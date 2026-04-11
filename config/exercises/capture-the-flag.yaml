@@ -1,0 +1,89 @@
+# Capture the Flag — Exercise Template
+# All coordinates in metres relative to AprilTag 101 (arena origin)
+
+exercise:
+  id: "capture-the-flag"
+  name: "Capture the Flag"
+  description: "Two teams compete to reach the opponent's flag zone while defending their own."
+
+  arena:
+    boundary_tags: [100, 101, 102, 103]
+    origin_tag: 101
+    obstacles:
+      - type: rectangle
+        x: 0.42
+        y: 0.15
+        width: 0.15
+        height: 0.03
+        label: "wall_north"
+      - type: rectangle
+        x: 0.42
+        y: 0.45
+        width: 0.15
+        height: 0.03
+        label: "wall_south"
+
+  teams:
+    - name: "blue"
+      colour: "#3B82F6"
+    - name: "red"
+      colour: "#EF4444"
+
+  robots:
+    physical:
+      - tag_id: 1
+        team: "blue"
+        sensor_preset: "basic_scout"
+      - tag_id: 2
+        team: "blue"
+        sensor_preset: "basic_scout"
+      - tag_id: 3
+        team: "red"
+        sensor_preset: "basic_scout"
+      - tag_id: 4
+        team: "red"
+        sensor_preset: "basic_scout"
+    virtual: []
+
+  participants:
+    - name: "Player 1"
+      team: "blue"
+      robots: [1]
+    - name: "Player 2"
+      team: "blue"
+      robots: [2]
+    - name: "Player 3"
+      team: "red"
+      robots: [3]
+    - name: "Player 4"
+      team: "red"
+      robots: [4]
+
+  rules:
+    max_linear_speed: 0.15
+    max_angular_speed: 1.5
+    sensor_config_locked: true
+    friendly_fire: false
+    duration_minutes: 5
+    tag_rules:
+      enabled: true
+      freeze_seconds: 5
+      immunity_after_unfreeze_seconds: 2
+
+  scoring:
+    type: "zone_capture"
+    zones:
+      - name: "blue_flag"
+        type: circle
+        x: 0.1
+        y: 0.3
+        radius: 0.05
+        team: "red"              # red scores by reaching blue's flag
+        hold_time_seconds: 10
+      - name: "red_flag"
+        type: circle
+        x: 0.74
+        y: 0.3
+        radius: 0.05
+        team: "blue"             # blue scores by reaching red's flag
+        hold_time_seconds: 10

@@ -1,0 +1,52 @@
+# ESP-IDF / Firmware
+firmware/build/
+firmware/sdkconfig.old
+firmware/managed_components/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+
+# ROS2 / colcon
+server/build/
+server/install/
+server/log/
+
+# KiCad
+hardware/pcb/*-backups/
+hardware/pcb/*.kicad_prl
+hardware/pcb/fp-info-cache
+hardware/pcb/*~
+
+# Recordings (large files)
+server/recordings/*.jsonl.gz
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Compiled
+*.o
+*.so
+*.a
+*.elf
+*.bin
+*.hex
+*.map
+
+# Node.js (if used for web dashboard)
+node_modules/
+package-lock.json
