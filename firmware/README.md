@@ -1,12 +1,13 @@
 # Firmware
 
-ESP32-C3 robot firmware using ESP-IDF v5.2 and micro-ROS.
+ESP32-C3 robot firmware using ESP-IDF v5.2 with plain UDP communication.
+
+micro-ROS integration is planned as future work once ESP-IDF compatibility issues are resolved.
 
 ## Setup
 
 1. Install [ESP-IDF v5.2+](https://docs.espressif.com/projects/esp-idf/en/stable/esp32c3/get-started/)
-2. Clone the [micro-ROS ESP-IDF component](https://github.com/micro-ROS/micro_ros_espidf_component) into `components/`
-3. Configure WiFi credentials in `menuconfig`
+2. Configure WiFi credentials and server IP in `menuconfig` or source code
 
 ## Build and Flash
 
@@ -15,6 +16,19 @@ idf.py set-target esp32c3
 idf.py build
 idf.py flash monitor
 ```
+
+## UDP Protocol
+
+| Command | Direction | Format | Response |
+|---------|-----------|--------|----------|
+| Move | Server → Robot | `M <linear> <angular>` | `OK` |
+| Stop | Server → Robot | `S` | `OK` |
+| LED on/off | Server → Robot | `L1` / `L0` | `OK` |
+| RGB colour | Server → Robot | `C <r> <g> <b>` | `OK` |
+| Display text | Server → Robot | `D <text>` | `OK` |
+| Register | Robot → Server | `REG <tag_id> <radius_mm>` | `OK <robot_id>` |
+| Heartbeat | Server → Robot | `H` | `OK` |
+| Ping | Either | `P` | `PONG` |
 
 ## GPIO Pin Assignment (ESP32-C3 SuperMini)
 

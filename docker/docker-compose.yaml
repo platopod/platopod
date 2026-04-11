@@ -1,0 +1,44 @@
+# Docker Compose for Plato Pod development
+#
+# Usage:
+#   docker compose up -d          # start container
+#   docker compose exec ros bash  # open shell in container
+#   docker compose down           # stop container
+#
+# Camera and WiFi dongle are passed through to the container.
+# --net=host is required for hostapd (WiFi AP) and micro-ROS UDP.
+
+services:
+  ros:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: platopod-ros
+    network_mode: host
+    privileged: true
+    stdin_open: true
+    tty: true
+    volumes:
+      # Mount the project source into the ROS2 workspace
+      - ../server:/ros2_ws/src/plato_pod
+      - ../config:/ros2_ws/config
+      - ../web:/ros2_ws/web
+
+      # Persist colcon build artifacts between container restarts
+      - ros-build:/ros2_ws/build
+      - ros-install:/ros2_ws/install
+      - ros-log:/ros2_ws/log
+    devices:
+      # Camera — adjust device number if needed (check: ls /dev/video*)
+      - /dev/video0:/dev/video0
+    environment:
+      - DISPLAY=${DISPLAY}
+      - ROS_DOMAIN_ID=0
+      # Admin token for exercise management API
+      - PLATOPOD_ADMIN_TOKEN=admin-secret
+    command: /bin/bash
+
+volumes:
+  ros-build:
+  ros-install:
+  ros-log:

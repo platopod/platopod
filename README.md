@@ -74,7 +74,7 @@ platopod/
 ## Hardware
 
 **Robot (Plato Pod):**
-- ESP32-C3 SuperMini (22.5×18mm, RISC-V, WiFi, micro-ROS)
+- ESP32-C3 SuperMini (22.5×18mm, RISC-V, WiFi, UDP protocol)
 - DRV8833 dual motor driver + 2× N20 gear motors
 - SSD1306 OLED display (128×64, I2C)
 - WS2812B RGB LED for status

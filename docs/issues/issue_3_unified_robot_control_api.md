@@ -176,7 +176,7 @@ Client (WebSocket)
     → Collision Filter (robot-robot clearance → collision_contact event)
     → Game Effects (rejects if robot is frozen — Issue #7)
     → Router
-        ├→ Physical: cmd_vel → micro-ROS agent → ESP32
+        ├→ Physical: cmd_vel → robot_bridge_node → UDP "M <linear> <angular>" → ESP32
         └→ Virtual: cmd_vel → Virtual Simulation Node (Issue #4)
 ```
 

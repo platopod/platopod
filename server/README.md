@@ -6,8 +6,10 @@ ROS2 Jazzy server nodes for the Plato Pod platform.
 
 - **vision_node** — Overhead camera capture, AprilTag detection, robot pose estimation
 - **sensor_sim_node** — Simulated proximity, line, and obstacle sensors based on arena map and robot poses
-- **api_gateway** — WebSocket API for student access to robot control and sensor data
-- **micro-ROS agent** — Bridges micro-ROS UDP traffic from ESP32 robots into the ROS2 network
+- **api_gateway** — WebSocket + REST API for student access to robot control and sensor data
+- **robot_bridge_node** — UDP communication with physical ESP32 robots (translates ROS2 cmd_vel to UDP motor commands)
+
+Note: micro-ROS agent integration is planned as future work. Currently, physical robots communicate via plain UDP.
 
 ## Setup
 
@@ -28,6 +30,12 @@ source install/setup.bash
 
 ```bash
 ros2 launch plato_pod server.launch.py
+```
+
+## Running the robot bridge (for physical ESP32 robots)
+
+```bash
+ros2 run plato_pod robot_bridge_node
 ```
 
 ## Configuration

@@ -21,20 +21,34 @@ Physical robot registration involves matching two independent data streams:
 
 **Camera stream:** The vision node detects AprilTag markers and maintains a list of visible tags with their poses. Tags in the robot ID range (e.g. 0–15) that are not yet matched to an online robot are listed as *discovered but unmatched*.
 
-**Robot connection:** When an ESP32 robot boots and connects to the micro-ROS agent, it registers with the server via a micro-ROS **service call** (not a topic publish) containing its AprilTag ID (stored in NVS flash as `u16` during manufacturing/setup) and its robot radius. The server receives the request, attempts to match it against the list of visible tags, and returns a response indicating success or failure.
+**Robot connection:** When an ESP32 robot boots, connects to the WiFi AP, and obtains an IP address, it sends a UDP registration message to the server's `robot_bridge_node`:
 
-Using a service call rather than a topic publish ensures reliable delivery — UDP-based topic publishes can be silently lost, whereas a service call provides a request/response handshake with retry logic.
+```
+REG <tag_id> <radius_mm>
+```
+
+The server receives the message, attempts to match the tag ID against the list of visible tags, and responds:
+
+- `OK <robot_id>` — registration successful, robot_id assigned
+- `DEFERRED` — tag not yet visible to camera, retry later
+- `ERR DUPLICATE` — another robot already registered with this tag ID
+
+The UDP registration provides a simple request/response handshake. The firmware retries every 2 seconds until it receives `OK`.
+
+The server also stores the robot's UDP source address (IP:port) so it can send commands (`M`, `S`, `L1`, etc.) back to the specific robot. The `robot_bridge_node` maintains this address mapping and translates ROS2 `cmd_vel` topics into UDP motor commands.
+
+**Note:** micro-ROS integration is planned as future work once ESP-IDF compatibility issues are resolved. The current UDP protocol provides equivalent functionality with simpler implementation.
 
 **Matching flow:**
 
 1. Server launches, camera starts broadcasting, vision node detects AprilTags.
 2. Detected robot-range tags are listed as *discovered, unmatched*.
-3. A physical robot powers on, connects to WiFi, registers with the micro-ROS agent, and sends a registration service call containing its tag ID and radius.
-4. Server matches the provided tag ID to the corresponding detected tag.
-5. On successful match: a robot entry is created in the registry with `type=physical`, the tag's current pose, the robot's radius, and a newly assigned `robot_id`. The `robot_id` is returned to the firmware in the service response.
-6. If the tag ID is not visible to the camera: the service call returns a "deferred" status. The firmware retries periodically (e.g. every 2 seconds) until the tag becomes visible and matching succeeds.
-7. If another robot has already registered with the same tag ID: the service call is rejected with a "duplicate tag ID" error. This indicates a firmware configuration mistake.
-8. If the robot disconnects (micro-ROS heartbeat lost): the registry entry is marked `inactive`. If the robot reconnects and re-sends the registration service call, it is re-matched and its existing `robot_id` is restored.
+3. A physical robot powers on, connects to the WiFi AP, and sends a UDP registration message `REG <tag_id> <radius_mm>` to the server.
+4. The `robot_bridge_node` receives the message and attempts to match the tag ID to a camera-detected tag.
+5. On successful match: a robot entry is created in the registry with `type=physical`, the tag's current pose, the robot's radius, and a newly assigned `robot_id`. The server responds `OK <robot_id>` and stores the robot's UDP address for future commands.
+6. If the tag ID is not visible to the camera: the server responds `DEFERRED`. The firmware retries every 2 seconds until the tag becomes visible and matching succeeds.
+7. If another robot has already registered with the same tag ID: the server responds `ERR DUPLICATE`. This indicates a firmware configuration mistake.
+8. If the robot stops responding to heartbeat pings (`H` → no `OK` within timeout): the registry entry is marked `inactive`. If the robot reconnects and re-sends `REG`, it is re-matched and its existing `robot_id` is restored.
 
 ### Virtual robot spawning
 
@@ -86,11 +100,21 @@ Returns a list of all registered robots with their ID, type, pose, radius, and s
 
 ### Architecture note
 
-The HTTP endpoints (`GET /robots`, `POST /robots/spawn`, etc.) are the student-facing API served by the API gateway node. Internally, the robot registry is a ROS2 node exposing ROS2 services. The API gateway translates between HTTP requests and ROS2 service calls. Physical robot registration bypasses the HTTP layer entirely — it uses micro-ROS service calls directly between the ESP32 firmware and the registry node.
+The HTTP endpoints (`GET /robots`, `POST /robots/spawn`, etc.) are the student-facing API served by the API gateway node. Internally, the robot registry is a ROS2 node exposing ROS2 services. The API gateway translates between HTTP requests and ROS2 service calls.
+
+Physical robot communication uses a separate `robot_bridge_node` that:
+- Listens for UDP `REG` messages from ESP32 robots and forwards registration to the registry node.
+- Subscribes to ROS2 `/robot_{id}/cmd_vel` topics and translates them to UDP `M <linear> <angular>` commands sent to the robot's stored UDP address.
+- Sends periodic heartbeat pings (`H`) to detect disconnected robots.
+
+```
+Student (WebSocket) → API Gateway → ROS2 /robot_{id}/cmd_vel → robot_bridge_node → UDP → ESP32
+ESP32 → UDP "REG" → robot_bridge_node → registry_node
+```
 
 ### Firmware requirement
 
-Each ESP32 robot must store its AprilTag ID in non-volatile storage (NVS). This is configured once during initial setup:
+Each ESP32 robot must store its AprilTag ID and radius in non-volatile storage (NVS). This is configured once during initial setup:
 
 ```c
 // During first-time setup or via serial command
@@ -98,20 +122,34 @@ nvs_set_u16(nvs_handle, "tag_id", 3);
 nvs_set_u16(nvs_handle, "radius_mm", 28);
 ```
 
-The firmware sends a registration service call to the server upon connecting to the micro-ROS agent. If the server responds with "deferred" (tag not yet visible), the firmware retries every 2 seconds.
+On boot, the firmware connects to the WiFi AP and sends a UDP registration message to the server:
+
+```c
+// Registration message: "REG <tag_id> <radius_mm>"
+char msg[32];
+snprintf(msg, sizeof(msg), "REG %d %d", tag_id, radius_mm);
+sendto(sock, msg, strlen(msg), 0, &server_addr, sizeof(server_addr));
+// Wait for "OK <robot_id>" or "DEFERRED", retry every 2 seconds
+```
+
+The firmware also implements the UDP command protocol for receiving motor commands (`M`), stop (`S`), LED control (`L1`/`L0`, `C`), display (`D`), and heartbeat (`H`). See `firmware/main/main.c` for the reference implementation.
+
+**Future work:** micro-ROS integration is planned once ESP-IDF compatibility issues are resolved, enabling native ROS2 topic subscription on the ESP32.
 
 ### Acceptance criteria
 
 - [ ] Server maintains a robot registry with ID, type, pose, radius, and status
-- [ ] Physical robots matched by correlating micro-ROS service call tag ID with camera-detected AprilTags
-- [ ] Registration uses micro-ROS service call (request/response) for reliable delivery
-- [ ] Unmatched connections handled gracefully (deferred with firmware retry, warning logged)
-- [ ] Duplicate tag ID connections rejected with clear error
+- [ ] Physical robots matched by correlating UDP registration tag ID with camera-detected AprilTags
+- [ ] Registration uses UDP request/response (`REG` → `OK`/`DEFERRED`/`ERR`)
+- [ ] `robot_bridge_node` stores robot UDP addresses and translates ROS2 cmd_vel to UDP motor commands
+- [ ] Unmatched connections handled gracefully (DEFERRED with firmware retry, warning logged)
+- [ ] Duplicate tag ID connections rejected with `ERR DUPLICATE`
 - [ ] Virtual robots spawned via HTTP API with boundary and collision validation
 - [ ] Spawn collision check uses sum of both robots' radii
 - [ ] Virtual robots removed via HTTP API; physical robot deletion rejected
 - [ ] Instructor can force-reset a physical robot entry
 - [ ] Robot list queryable by clients, returning all active robots with radius
-- [ ] Physical robot disconnection updates registry status to inactive
+- [ ] Heartbeat pings detect disconnected robots, registry status updated to inactive
 - [ ] Physical robot reconnection re-matches and restores existing robot_id
 - [ ] ESP32 firmware stores tag ID and radius in NVS as u16
+- [ ] Future work: micro-ROS integration documented as upgrade path
