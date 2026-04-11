@@ -1,4 +1,4 @@
-FROM ros:jazzy-desktop
+FROM osrf/ros:jazzy-desktop
 
 # Avoid interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
@@ -17,13 +17,13 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Python dependencies
-RUN pip install --break-system-packages \
-    shapely>=2.0 \
+# Python dependencies (separate RUN to isolate pip errors)
+RUN pip3 install --break-system-packages --ignore-installed \
+    shapely \
     numpy \
     websockets \
     fastapi \
-    uvicorn[standard] \
+    "uvicorn[standard]" \
     pyyaml \
     opencv-python-headless \
     pytest \

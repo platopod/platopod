@@ -23,6 +23,7 @@ services:
       - ../server:/ros2_ws/src/plato_pod
       - ../config:/ros2_ws/config
       - ../web:/ros2_ws/web
+      - ../docker:/ros2_ws/docker
 
       # Persist colcon build artifacts between container restarts
       - ros-build:/ros2_ws/build
