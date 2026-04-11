@@ -134,6 +134,7 @@ Development is tracked via 10 core issues. See [`docs/issues/`](docs/issues/) fo
 
 | # | Issue | Description |
 |---|-------|-------------|
+| 0 | Vision Node | Camera capture, AprilTag detection, pose estimation, MJPEG stream |
 | 1 | Arena Boundary and Model | Dynamic boundary, obstacles, zones, coordinate system |
 | 2 | Robot Spawning and Discovery | Physical/virtual robot registry, AprilTag matching |
 | 3 | Unified Robot Control API | WebSocket commands, collision filtering, Python SDK |

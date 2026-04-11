@@ -1,0 +1,24 @@
+apriltag_settings:
+  family: "tag36h11"
+  
+  # Physical tag sizes (outer dimension including white border) in metres
+  tag_sizes:
+    default: 0.050          # 50mm — standard Plato Pod robot tag
+    boundary: 0.070         # 70mm — larger for reliable corner detection
+  
+  # Tag ID ranges
+  tag_ranges:
+    robots: [0, 15]         # IDs 0–15 are robot tags
+    boundary: [100, 103]    # IDs 100–103 are arena corners
+    origin: 101             # coordinate system origin
+  
+  # Detector parameters
+  detector:
+    nthreads: 4
+    quad_decimate: 2.0      # 1.0 = full resolution (slower), 2.0 = half (faster)
+    refine_edges: true
+    decode_sharpening: 0.25
+  
+  # Performance
+  detection_fps: 30         # target detection rate
+  pose_estimation: true     # enable 3D pose estimation (requires calibration)

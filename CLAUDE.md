@@ -257,6 +257,7 @@ Examples:
 | Python | 3.12+ | Server language |
 | Shapely | ≥2.0 | Computational geometry (ray casting) |
 | NumPy | latest | Numerics, noise generation |
+| pupil-apriltags | latest | AprilTag detection and pose estimation |
 | FastAPI | latest | REST API + WebSocket server |
 | uvicorn | latest | ASGI server for FastAPI |
 | websockets | latest | WebSocket client for testing |
@@ -288,15 +289,16 @@ Examples:
 
 Issues should be implemented roughly in this order due to dependencies:
 
-1. **Issue #1** — Arena model (foundation)
-2. **Issue #2** — Robot registry (needs #1 for spawn validation)
-3. **Issue #4** — Virtual simulation (can develop in parallel with #3)
-4. **Issue #3** — Control API (needs #1, #2; pulls in #4)
-5. **Issue #5** — Dashboard Phase 1 (needs #3)
-6. **Issue #8** — Sensor engine + Lidar/Sonar (needs #1, #4)
-7. **Issue #6** — Sensor API (needs #8 for data to serve)
-8. **Issue #9** — GPS/FoF plugins (needs #7 for teams, #8 for engine)
-9. **Issue #7** — Exercise management (needs #2, #3, #6)
-10. **Issue #10** — Dashboard Phase 2 (needs everything)
+1. **Issue #0** — Vision node (foundation — camera, AprilTag detection, pose estimation)
+2. **Issue #1** — Arena model (needs tag poses from #0)
+3. **Issue #2** — Robot registry (needs #0 for tag visibility, #1 for spawn validation)
+4. **Issue #4** — Virtual simulation (can develop in parallel with #3)
+5. **Issue #3** — Control API (needs #1, #2; pulls in #4)
+6. **Issue #5** — Dashboard Phase 1 (needs #0 camera stream, #3)
+7. **Issue #8** — Sensor engine + Lidar/Sonar (needs #1, #4)
+8. **Issue #6** — Sensor API (needs #8 for data to serve)
+9. **Issue #9** — GPS/FoF plugins (needs #7 for teams, #8 for engine)
+10. **Issue #7** — Exercise management (needs #2, #3, #6)
+11. **Issue #10** — Dashboard Phase 2 (needs everything)
 
 Within each issue, implement and test the core functionality first, then edge cases and optional features.
