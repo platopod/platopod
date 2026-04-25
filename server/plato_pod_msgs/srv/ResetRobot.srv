@@ -1,0 +1,5 @@
+# Force-reset a physical robot entry (mark inactive, release tag_id)
+int32 robot_id
+---
+bool success
+string message

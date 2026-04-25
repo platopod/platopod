@@ -1,22 +1,24 @@
 # Plato Pod
 
-**An open-source educational robotics platform for teaching programming, multi-robot coordination, and wargaming through hands-on robot control.**
+**An augmented reality tactical simulation platform for military training exercises.**
 
-Plato Pod is a classroom-ready robotics platform combining physical and virtual robots on a shared arena. An overhead camera tracks physical robots via AprilTag markers, while virtual robots are simulated server-side with identical kinematics. A unified API lets students control both types identically — writing Python scripts for obstacle avoidance, formation control, sensor fusion, and team-based wargaming exercises.
+Plato Pod operates at multiple physical scales — from desktop arenas with small differential-drive robots localised by AprilTag cameras, to outdoor exercises with GPS/IMU-equipped units. Physical and virtual elements coexist on the same arena: real robots interact with virtual units, gas plumes, terrain overlays, and engagement rules to create tactical training scenarios.
+
+Four simulation modes: **lightweight** (Python kinematics), **Gazebo** (3D physics), **Gazebo terrain** (real DEM heightmaps + sensor bridging), or **replay** (GPS track playback). Switch with one launch argument.
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                  ROS2 Server (Raspberry Pi 5)                │
+│              ROS2 Server (Jetson / Mini PC / Pi 5)           │
 │                                                              │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐  │
-│  │  Vision   │  │  Sensor  │  │ Virtual  │  │  Exercise   │  │
-│  │   Node    │  │  Engine  │  │   Sim    │  │  Manager    │  │
+│  │  Vision   │  │  Sensor  │  │ Gazebo   │  │    CoT      │  │
+│  │   Node    │  │  Engine  │  │ Bridge   │  │   Bridge    │  │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬──────┘  │
 │       │              │             │               │         │
 │  ┌────┴──────────────┴─────────────┴───────────────┴──────┐  │
-│  │                    Arena Model                         │  │
+│  │          Arena Model + Registry + Ghost Models         │  │
 │  └────────────────────────┬───────────────────────────────┘  │
 │                           │                                  │
 │  ┌────────────────────────┴───────────────────────────────┐  │
@@ -27,130 +29,107 @@ Plato Pod is a classroom-ready robotics platform combining physical and virtual 
               ┌─────────────┼─────────────┐
               │             │             │
         ┌─────┴─────┐ ┌────┴────┐ ┌──────┴──────┐
-        │  Python   │ │   Web   │ │  Projector  │
-        │   SDK     │ │Dashboard│ │   AR View   │
+        │  Python   │ │   Web   │ │    ATAK     │
+        │   SDK     │ │Dashboard│ │ (tactical)  │
         └───────────┘ └─────────┘ └─────────────┘
 ```
 
 ## Key Features
 
-- **Physical + virtual robots** on the same arena with unified control API
-- **Simulated sensors** — Lidar, Sonar, GPS, Friend-or-Foe — computed server-side via ray casting
-- **Dynamic arena** — boundary defined by AprilTags, obstacles and zones configurable mid-session
-- **Exercise engine** — structured sessions with teams, scoring, game effects (tag, freeze, capture)
-- **AR dashboard** — live camera feed with IPM rectification and sensor visualisation overlay
-- **Projector AR** — virtual elements projected onto the physical arena surface
-- **Python SDK** — clean API for students, with future C/MATLAB bindings planned
+- **Multi-scale** — desktop arenas (AprilTag camera), indoor (RF anchors), outdoor (GPS/IMU)
+- **Mixed reality** — physical and virtual units coexist with virtual gas plumes, terrain, enemies
+- **Real terrain** — DEM heightmap pipeline loads real geographic data into Gazebo
+- **ATAK integration** — MIL-STD-2525B symbols on military tablets, bidirectional waypoints
+- **Gazebo sensor bridge** — physics-accurate lidar, IMU from Gazebo (GPU or CPU fallback)
+- **GADEN gas simulation** — filament-based gas dispersion with MOX sensor digital twin
+- **Ghost models** — desktop robots get scaled virtual counterparts in Gazebo terrain
+- **Exercise replay** — load GPS tracks from prior exercises, replay on real terrain
+- **Scale factor** — 0.84m desktop arena represents 840m of real terrain at 1000:1
+- **4 vehicle types** — platopod, tank, APC, recon with MIL-STD type codes
+- **Python SDK** — synchronous API for autonomous robot programming
+- **618 unit tests** — all run without ROS2 or hardware
 
 ## Repository Structure
 
 ```
 platopod/
-├── firmware/              # ESP32-C3 robot firmware (ESP-IDF + micro-ROS)
-│   ├── main/              #   application source
-│   └── components/        #   micro-ROS ESP-IDF component
-├── server/                # ROS2 server nodes
-│   ├── src/               #   node implementations
+├── firmware/              # ESP32-C3 robot firmware (ESP-IDF, UDP protocol)
+├── server/                # ROS2 server nodes (Python 3.12)
+│   ├── src/plato_pod/     #   node implementations + domain logic
 │   ├── launch/            #   ROS2 launch files
 │   ├── config/            #   arena and sensor configuration
-│   ├── plugins/
-│   │   ├── sensors/       #   sensor plugins (Lidar, Sonar, GPS, FoF)
-│   │   └── scoring/       #   scoring plugins
-│   └── recordings/        #   exercise replay data
+│   └── tests/             #   618 unit tests
+├── models/                # Gazebo SDF vehicle models (platopod, tank, APC, recon)
 ├── hardware/              # PCB designs (KiCad) and 3D-printable chassis
-│   ├── pcb/
-│   ├── chassis/
-│   └── bom/
-├── web/                   # Web dashboard (HTML/JS)
-│   ├── src/
-│   └── static/
+├── web/                   # Web dashboard (HTML/JS) + Python SDK
 ├── config/
 │   └── exercises/         # Exercise YAML templates
-└── docs/
-    ├── issues/            # Issue specifications
-    └── shopping-lists/    # Component procurement lists
+└── docs/                  # Architecture documentation
 ```
 
 ## Hardware
 
 **Robot (Plato Pod):**
-- ESP32-C3 SuperMini (22.5×18mm, RISC-V, WiFi, UDP protocol)
-- DRV8833 dual motor driver + 2× N20 gear motors
-- SSD1306 OLED display (128×64, I2C)
+- ESP32-C3 SuperMini (22.5x18mm, RISC-V, WiFi, UDP protocol)
+- DRV8833 dual motor driver + 2x N20 gear motors
+- SSD1306 OLED display (128x64, I2C)
 - WS2812B RGB LED for status
 - 3.7V 500mAh LiPo + TP4056 USB-C charger
 - 55mm circular chassis with AprilTag marker
 
 **Server:**
-- Raspberry Pi 5 (2GB) running Ubuntu 24.04 + ROS2 Jazzy
-- OV2710 USB camera (1080p, 100° FOV, overhead mount)
-- MT7612U USB WiFi (5GHz AP for students)
-- Optional: UMBOLITE HY320 mini projector for arena AR projection
+- NVIDIA Jetson, mini PC with GPU, or Raspberry Pi 5
+- USB camera (optional, for AprilTag localisation)
+- WiFi AP for robot communication
 
 ## Quick Start
 
-### Prerequisites
+```bash
+# Docker (recommended)
+cd docker && docker compose up -d && docker compose exec ros bash
 
-- [ESP-IDF v5.2+](https://docs.espressif.com/projects/esp-idf/en/stable/esp32c3/get-started/)
-- [ROS2 Jazzy Jalisco](https://docs.ros.org/en/jazzy/Installation.html)
-- Python 3.12+
-- Shapely ≥2.0, NumPy
+# Inside container
+cd /ros2_ws && colcon build && source install/setup.bash
 
-### Student (Python SDK)
+# Lightweight mode (no Gazebo, no camera)
+ros2 launch plato_pod atak_test.launch.py \
+  exercise_file:=/ros2_ws/config/exercises/capture-the-flag.yaml \
+  target_host:=192.168.1.42
+
+# Gazebo with real terrain
+ros2 launch plato_pod simulation.launch.py mode:=gazebo_terrain \
+  exercise_file:=/ros2_ws/config/exercises/adfa-terrain-patrol.yaml \
+  scale_factor:=1000
+```
+
+### Python SDK
 
 ```python
 from platopod import Arena
 
-arena = Arena("ws://192.168.4.1:8080/api/control")
-robots = arena.list_robots()
-
-arena.subscribe_sensors(robot_id=1, sensors=["gps", "lidar_2d"], rate_hz=10)
+arena = Arena("ws://localhost:8080/api/control")
+arena.subscribe_sensors(robot_id=1, sensors=["gps", "gas"], rate_hz=10)
 
 while True:
-    gps = arena.get_sensor(robot_id=1, sensor="gps")
-    scan = arena.get_sensor(robot_id=1, sensor="lidar_2d")
-
-    if scan and min(scan["ranges"]) < 0.1:
-        arena.cmd_vel(robot_id=1, linear_x=0.0, angular_z=0.5)
+    gas = arena.get_sensor(robot_id=1, sensor="gas")
+    if gas and gas["concentration"] > 50:
+        arena.cmd_vel(robot_id=1, linear_x=0.0, angular_z=0.5)  # turn away
     else:
-        arena.cmd_vel(robot_id=1, linear_x=0.15, angular_z=0.0)
-
+        arena.cmd_vel(robot_id=1, linear_x=0.15, angular_z=0.0)  # advance
     arena.sleep(0.1)
 ```
 
-### Instructor
+## Exercise Scenarios
 
-```python
-from platopod import AdminClient
-
-admin = AdminClient("http://192.168.4.1:8080", token="admin-secret")
-admin.load_exercise("capture-the-flag.yaml")
-admin.start()
-```
-
-## Issue Tracker
-
-Development is tracked via 10 core issues. See [`docs/issues/`](docs/issues/) for full specifications.
-
-| # | Issue | Description |
-|---|-------|-------------|
-| 0 | Vision Node | Camera capture, AprilTag detection, pose estimation, MJPEG stream |
-| 1 | Arena Boundary and Model | Dynamic boundary, obstacles, zones, coordinate system |
-| 2 | Robot Spawning and Discovery | Physical/virtual robot registry, AprilTag matching |
-| 3 | Unified Robot Control API | WebSocket commands, collision filtering, Python SDK |
-| 4 | Virtual Robot Simulation | Server-side differential drive kinematics |
-| 5 | Web Dashboard Phase 1 | Live camera + AR overlay |
-| 6 | Unified Sensor API | Sensor subscription, streaming, team sharing |
-| 7 | Exercise and Team Management | Admin, teams, scoring, game effects |
-| 8 | Range Sensors | Sensor engine, ray caster, Lidar, Sonar plugins |
-| 9 | Position/ID Sensors | GPS, Friend-or-Foe plugins |
-| 10 | Web Dashboard Phase 2 | IPM, sensor viz, interactive control, projector AR |
+| Scenario | Description | Virtual layers |
+|----------|-------------|----------------|
+| **Capture the Flag** | Two teams compete to reach opponent's flag zone | Boundary enforcement, tag-freeze rules |
+| **Gas Plume Search** | Locate a virtual gas source using MOX sensors | Gaussian plume, MOX sensor dynamics |
+| **ADFA Terrain Patrol** | Patrol real ADFA campus terrain at 1000:1 scale | SRTM heightmap, CBRN hazard, ATAK output |
 
 ## Team
 
 - **Artem Lensky** — Project lead, UNSW Canberra
-- **Rhi-Anne Chng** — Hardware and firmware (FYP student)
-- **Haoren** — Server software and vision pipeline (Research Assistant)
 
 ## License
 

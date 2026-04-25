@@ -1,0 +1,10 @@
+camera_calibration:
+  image_width: 1920
+  image_height: 1080
+  camera_matrix:
+    - [800.0, 0, 960.0]
+    - [0, 800.0, 540.0]
+    - [0, 0, 1]
+  distortion_coefficients: [0.01, -0.02, 0.001, -0.001, 0.005]
+  calibration_date: "2026-04-12"
+  reprojection_error: 0.25

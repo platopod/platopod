@@ -2,11 +2,10 @@
 
 ## Project Overview
 
-Plato Pod is an educational robotics platform combining physical ESP32-C3 robots and server-side virtual robots on a shared arena. The system uses ROS2 Jazzy on a Raspberry Pi 5 running Ubuntu 24.04. Development happens on a Linux workstation (Ubuntu 24.04, WSL2, or native).
+Plato Pod is an augmented reality tactical simulation platform that operates at multiple scales — from desktop arenas with small differential-drive robots localised by AprilTag cameras, to outdoor exercises with military units carrying GPS/IMU for localisation. Physical and virtual elements coexist on the same arena: real robots interact with virtual units (blue/red force), virtual gas plumes, terrain overlays, obstacles, and engagement rules to create sophisticated tactical training scenarios. The system uses ROS2 Jazzy. Target hardware: NVIDIA Jetson, mini PC with GPU, or Raspberry Pi 5. Development happens on a Linux workstation (Ubuntu 24.04, WSL2, or native).
 
 **Repository:** https://github.com/platopod/platopod
 **Branch:** v2-platform
-**Issue specifications:** `docs/issues/issue_*.md` — read these before implementing anything.
 
 ## Architecture Summary
 
@@ -19,13 +18,16 @@ config/       → Exercise YAML templates
 ```
 
 The server is the core — it runs on ROS2 Jazzy and consists of these nodes:
-- `arena_model_node` — arena boundary, obstacles, zones (Issue #1)
-- `registry_node` — robot registry, spawning, discovery (Issue #2)
-- `api_gateway_node` — WebSocket + REST API (Issues #3, #6)
-- `robot_bridge_node` — UDP communication with physical ESP32 robots (Issue #2, #3)
-- `virtual_sim_node` — virtual robot kinematics (Issue #4)
-- `sensor_engine_node` — sensor computation with plugins (Issues #8, #9)
-- `exercise_manager_node` — exercise lifecycle, teams, scoring (Issue #7)
+- `arena_model_node` — arena boundary, obstacles, zones from exercise YAML
+- `registry_node` — robot registry, spawning, discovery
+- `api_gateway_node` — WebSocket + REST API, command pipeline, event injection
+- `robot_bridge_node` — UDP communication with physical ESP32 robots
+- `virtual_sim_node` — virtual robot kinematics (lightweight mode)
+- `sensor_engine_node` — sensor computation with plugins + Gazebo bridge
+- `gazebo_bridge_node` — Gazebo lifecycle, terrain, ghost models, sensor bridging
+- `cot_bridge_node` — CoT/ATAK integration (positions, zones, sensor data)
+- `replay_node` — GPS track replay from recorded exercises
+- `vision_node` — AprilTag detection and MJPEG streaming
 
 ### Physical robot communication
 
@@ -213,11 +215,10 @@ server/
 
 ## Development Workflow
 
-### Before starting an issue
+### Before starting a task
 
-1. **Read the issue specification** in `docs/issues/issue_N_*.md` completely.
-2. **Check dependencies** — are prerequisite issues implemented and tested?
-3. **Propose a plan** — outline the files to create/modify, key functions, and test approach. Present to the user for approval before writing code.
+1. **Propose a plan** — outline the files to create/modify, key functions, and test approach. Present to the user for approval before writing code.
+2. **Check existing code** — understand existing patterns and abstractions before proposing new ones.
 
 ### While implementing
 
@@ -229,9 +230,7 @@ server/
 ### After implementing
 
 1. **Run the full test suite** — unit and integration.
-2. **Verify with RViz2** when implementing nodes that publish visual data.
-3. **Present a summary** — what was implemented, what tests pass, any deviations from the spec.
-4. **Update the issue spec** if the implementation revealed spec gaps.
+2. **Present a summary** — what was implemented, what tests pass, any deviations from the plan.
 
 ## Commit Messages
 
@@ -277,28 +276,28 @@ Examples:
 
 ## Important Constraints
 
-- **Raspberry Pi 5 (2GB) is the target.** Code must be efficient — avoid unnecessary memory allocation, prefer generators over lists for large datasets.
-- **Shapely for geometry, not a physics engine.** We need ray-polygon intersection, not rigid body dynamics.
-- **All coordinates in metres relative to AprilTag 101.** This is the universal coordinate system.
-- **Physical robots use plain UDP, not micro-ROS.** The `robot_bridge_node` translates between ROS2 topics and the ESP32 UDP protocol. micro-ROS is planned as future work.
-- **Sensor plugins are stateless.** They receive a SensorContext and return data. No side effects, no ROS2 subscriptions inside plugins.
-- **The WebSocket API carries everything** — commands, poses, events, sensor data. One connection per client, multiplexed by message type.
+- **GPU is optional.** If GPU is available, use gpu_lidar and GPU rendering. If not, fall back to cpu_lidar and software rendering. The platform must always work without GPU.
+- **Target hardware:** NVIDIA Jetson, mini PC with GPU, or Raspberry Pi 5. Code must be efficient — avoid unnecessary memory allocation, prefer generators over lists for large datasets.
+- **Gazebo for physics, Python for tactics.** Gazebo owns terrain physics, sensor ray casting, collision dynamics. Python owns engagement rules, scoring, gas simulation (research iteration speed), exercise management.
+- **All coordinates in metres relative to arena origin (AprilTag 101 when using camera localisation).** GeoReference with scale_factor handles conversion to WGS84.
+- **Physical robots use plain UDP, not micro-ROS.** The `robot_bridge_node` translates between ROS2 topics and the ESP32 UDP protocol.
+- **Sensor plugins receive EnvironmentContext and per-robot state.** Gas sensors use stateful MOX ODE dynamics. Lidar/IMU can be bridged from Gazebo or computed in Python fallback.
+- **The WebSocket API carries everything** — commands, poses, events, sensor data, environment updates, event injection (admin-gated). One connection per client, multiplexed by message type.
 - **Free-play mode is the default.** When no exercise is loaded, no permissions are enforced. The system should be fully functional without the exercise manager.
 
-## Issue Implementation Order
+## Module Architecture
 
-Issues should be implemented roughly in this order due to dependencies:
+See `docs/ARCHITECTURE.md` for the full layer diagram.
 
-1. **Issue #0** — Vision node (foundation — camera, AprilTag detection, pose estimation)
-2. **Issue #1** — Arena model (needs tag poses from #0)
-3. **Issue #2** — Robot registry (needs #0 for tag visibility, #1 for spawn validation)
-4. **Issue #4** — Virtual simulation (can develop in parallel with #3)
-5. **Issue #3** — Control API (needs #1, #2; pulls in #4)
-6. **Issue #5** — Dashboard Phase 1 (needs #0 camera stream, #3)
-7. **Issue #8** — Sensor engine + Lidar/Sonar (needs #1, #4)
-8. **Issue #6** — Sensor API (needs #8 for data to serve)
-9. **Issue #9** — GPS/FoF plugins (needs #7 for teams, #8 for engine)
-10. **Issue #7** — Exercise management (needs #2, #3, #6)
-11. **Issue #10** — Dashboard Phase 2 (needs everything)
-
-Within each issue, implement and test the core functionality first, then edge cases and optional features.
+**Core abstractions (Layer 3, pure Python):**
+- `pose.py` — `RobotPose` + `PoseSource` enum (localization-agnostic)
+- `robot.py` — unified `Robot` dataclass (deployment, localization, kinematics)
+- `kinematics_model.py` — pluggable `KinematicsModel` (DifferentialDrive, Omnidirectional)
+- `sensor_engine.py` — per-robot state, environment context, Gazebo bridge multiplexing
+- `spatial_field.py` — `SpatialField` protocol (GaussianPlume, Elevation, Uniform, Composite)
+- `terrain_pipeline.py` — DEM → Gazebo heightmap PNG pipeline
+- `ghost_model_manager.py` — physical robot → scaled Gazebo ghost model
+- `replay.py` — GPX/YAML track loading + interpolation
+- `geo_reference.py` — WGS84 arena↔lat/lon with scale factor
+- `cot_protocol.py` — CoT XML generation/parsing, MIL-STD-2525B type codes
+- `command_pipeline.py` — velocity filtering with terrain speed modifier

@@ -26,14 +26,15 @@ RUN pip3 install --break-system-packages --ignore-installed \
     "uvicorn[standard]" \
     pyyaml \
     opencv-python-headless \
+    pupil-apriltags \
     pytest \
     pytest-asyncio \
     pytest-cov
 
-# micro-ROS agent (future work — currently using plain UDP for ESP32 communication)
-# RUN apt-get update && apt-get install -y \
-#     ros-jazzy-micro-ros-agent \
-#     && rm -rf /var/lib/apt/lists/*
+# Gazebo simulation (optional — for 3D physics mode)
+RUN apt-get update && apt-get install -y \
+    ros-jazzy-ros-gz \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create workspace
 WORKDIR /ros2_ws

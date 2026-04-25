@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plato Pod Arena</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; color: #eee; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
+  #container { position: relative; width: 100vw; height: 100vh; }
+  #camera-feed { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; display: none; }
+  #camera-feed.visible { display: block; }
+  #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  #overlay.interactive { pointer-events: auto; cursor: crosshair; }
+
+  #hud { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.75); padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.7; min-width: 180px; z-index: 10; }
+  #hud .label { color: #888; }
+  #hud .value { color: #eee; font-weight: 500; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  .dot.on { background: #22c55e; }
+  .dot.off { background: #ef4444; }
+
+  #controls { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.75); padding: 8px 12px; border-radius: 8px; font-size: 13px; z-index: 10; }
+  #controls label { display: block; margin: 3px 0; cursor: pointer; user-select: none; }
+  #controls input[type=checkbox] { margin-right: 6px; vertical-align: middle; }
+  #controls hr { border: none; border-top: 1px solid #444; margin: 6px 0; }
+
+  #detail { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); padding: 10px 18px; border-radius: 8px; font-size: 13px; display: none; white-space: nowrap; z-index: 10; }
+  #detail.visible { display: block; }
+</style>
+</head>
+<body>
+<div id="container">
+  <img id="camera-feed" alt="">
+  <canvas id="overlay"></canvas>
+
+  <div id="hud">
+    <div><span class="label">Robots: </span><span class="value" id="hud-robots">0</span></div>
+    <div><span class="label">Server: </span><span class="dot off" id="hud-dot"></span><span class="value" id="hud-status">disconnected</span></div>
+    <div><span class="label">Arena: </span><span class="value" id="hud-arena">--</span></div>
+    <div><span class="label">Mode: </span><span class="value" id="hud-mode">map</span></div>
+  </div>
+
+  <div id="controls">
+    <label><input type="checkbox" id="toggle-camera"> Camera overlay</label>
+    <hr>
+    <label><input type="checkbox" id="toggle-boundary" checked> Boundary</label>
+    <label><input type="checkbox" id="toggle-obstacles" checked> Obstacles</label>
+    <label><input type="checkbox" id="toggle-zones" checked> Zones</label>
+    <label><input type="checkbox" id="toggle-robots" checked> Robots</label>
+    <label><input type="checkbox" id="toggle-labels" checked> Labels</label>
+  </div>
+
+  <div id="detail"></div>
+</div>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+const S = {
+  robots: {},           // robot_id -> robot dict
+  arenaModel: null,     // {boundary, obstacles, zones}
+  homography: null,     // {matrix, valid}
+  pixelDetections: null,// {boundary_tags, robot_tags}
+  wsConnected: false,
+  selectedRobot: null,
+  cameraMode: false,    // false = map mode (default)
+  showBoundary: true,
+  showObstacles: true,
+  showZones: true,
+  showRobots: true,
+  showLabels: true,
+};
+
+const canvas = document.getElementById('overlay');
+const ctx = canvas.getContext('2d');
+
+// ============================================================
+// Map mode coordinate transform (arena metres -> canvas pixels)
+// ============================================================
+let mapTransform = null; // {scale, offsetX, offsetY, arenaMinX, arenaMinY}
+
+function computeMapTransform() {
+  const model = S.arenaModel;
+  if (!model || !model.boundary || model.boundary.length < 3) {
+    mapTransform = null;
+    return;
+  }
+  const xs = model.boundary.map(v => v[0]);
+  const ys = model.boundary.map(v => v[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const arenaW = maxX - minX || 1;
+  const arenaH = maxY - minY || 1;
+
+  const margin = 40;
+  const availW = canvas.width - margin * 2;
+  const availH = canvas.height - margin * 2;
+  const scale = Math.min(availW / arenaW, availH / arenaH);
+
+  const renderedW = arenaW * scale;
+  const renderedH = arenaH * scale;
+
+  mapTransform = {
+    scale,
+    offsetX: (canvas.width - renderedW) / 2,
+    offsetY: (canvas.height - renderedH) / 2,
+    minX, minY, arenaW, arenaH,
+  };
+}
+
+function mapArenaToCanvas(x, y) {
+  if (!mapTransform) return null;
+  return {
+    cx: mapTransform.offsetX + (x - mapTransform.minX) * mapTransform.scale,
+    cy: mapTransform.offsetY + (mapTransform.arenaH - (y - mapTransform.minY)) * mapTransform.scale,
+    // Y flipped: arena Y up, canvas Y down
+  };
+}
+
+function mapDistToCanvas(metres) {
+  return mapTransform ? metres * mapTransform.scale : 10;
+}
+
+// ============================================================
+// Camera mode coordinate transform (pixel -> canvas)
+// ============================================================
+function getImageRect() {
+  const img = document.getElementById('camera-feed');
+  if (!img.naturalWidth) return null;
+  const imgRatio = img.naturalWidth / img.naturalHeight;
+  const cRatio = canvas.width / canvas.height;
+  let rw, rh, ox, oy;
+  if (imgRatio > cRatio) {
+    rw = canvas.width; rh = rw / imgRatio; ox = 0; oy = (canvas.height - rh) / 2;
+  } else {
+    rh = canvas.height; rw = rh * imgRatio; ox = (canvas.width - rw) / 2; oy = 0;
+  }
+  return { rw, rh, ox, oy, nw: img.naturalWidth, nh: img.naturalHeight };
+}
+
+function pixelToCanvas(px, py) {
+  const r = getImageRect();
+  if (!r || !r.nw) return null;
+  return { cx: r.ox + px * r.rw / r.nw, cy: r.oy + py * r.rh / r.nh };
+}
+
+// ============================================================
+// Camera AR mode: affine transform from arena to pixel coords
+// Computed client-side from matched boundary tag correspondences
+// ============================================================
+let arTransform = null; // {a, b, c, d, e, f} for affine: px = a*x + b*y + c, py = d*x + e*y + f
+
+function computeARTransform() {
+  // Match boundary tags: arena model boundary (sorted by tag ID in order)
+  // with pixel detections boundary_tags (have tag_id + center pixel)
+  const model = S.arenaModel;
+  const det = S.pixelDetections;
+  if (!model || !model.boundary || !det || !det.boundary_tags) { arTransform = null; return; }
+
+  // Arena model boundary vertices are sorted by tag ID (from arena_model_node)
+  // Pixel detections have tag_id — sort them the same way
+  const sortedDet = [...det.boundary_tags].sort((a, b) => a.tag_id - b.tag_id);
+
+  // We need at least 3 correspondences for an affine transform
+  const n = Math.min(model.boundary.length, sortedDet.length);
+  if (n < 3) { arTransform = null; return; }
+
+  // Build least-squares system for affine transform
+  // For each pair: px_i = a*ax_i + b*ay_i + c, py_i = d*ax_i + e*ay_i + f
+  // This is two independent linear systems
+  const ax = [], ay = [], px = [], py = [];
+  for (let i = 0; i < n; i++) {
+    ax.push(model.boundary[i][0]);
+    ay.push(model.boundary[i][1]);
+    px.push(sortedDet[i].center[0]);
+    py.push(sortedDet[i].center[1]);
+  }
+
+  // Solve using normal equations: [a,b,c] = (A^T A)^-1 A^T px
+  // A = [[ax0, ay0, 1], [ax1, ay1, 1], ...]
+  const A = ax.map((x, i) => [x, ay[i], 1]);
+  const solX = solveLeastSquares(A, px);
+  const solY = solveLeastSquares(A, py);
+  if (!solX || !solY) { arTransform = null; return; }
+
+  arTransform = { a: solX[0], b: solX[1], c: solX[2], d: solY[0], e: solY[1], f: solY[2] };
+}
+
+function solveLeastSquares(A, b) {
+  // Solve A*x = b using normal equations (A^T A)x = A^T b
+  const n = A[0].length; // 3
+  const m = A.length;
+  // Compute A^T A (3x3)
+  const AtA = Array.from({length: n}, () => Array(n).fill(0));
+  const Atb = Array(n).fill(0);
+  for (let i = 0; i < m; i++) {
+    for (let j = 0; j < n; j++) {
+      Atb[j] += A[i][j] * b[i];
+      for (let k = 0; k < n; k++) AtA[j][k] += A[i][j] * A[i][k];
+    }
+  }
+  // Solve 3x3 system by Cramer's rule
+  const det3 = (m) => m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1]) - m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0]) + m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);
+  const D = det3(AtA);
+  if (Math.abs(D) < 1e-12) return null;
+  const result = [];
+  for (let col = 0; col < 3; col++) {
+    const M = AtA.map(r => [...r]);
+    for (let row = 0; row < 3; row++) M[row][col] = Atb[row];
+    result.push(det3(M) / D);
+  }
+  return result;
+}
+
+function arenaToPixelAR(x, y) {
+  if (!arTransform) return null;
+  return {
+    px: arTransform.a * x + arTransform.b * y + arTransform.c,
+    py: arTransform.d * x + arTransform.e * y + arTransform.f,
+  };
+}
+
+function arenaToCanvasAR(x, y) {
+  const pix = arenaToPixelAR(x, y);
+  if (!pix) return null;
+  return pixelToCanvas(pix.px, pix.py);
+}
+
+function arenaDistToCanvasAR(metres) {
+  const p1 = arenaToCanvasAR(0, 0);
+  const p2 = arenaToCanvasAR(metres, 0);
+  if (!p1 || !p2) return 10;
+  return Math.sqrt((p2.cx - p1.cx) ** 2 + (p2.cy - p1.cy) ** 2);
+}
+
+// ============================================================
+// Unified coordinate helpers (dispatch based on mode)
+// ============================================================
+function arenaToCanvas(x, y) {
+  return S.cameraMode ? arenaToCanvasAR(x, y) : mapArenaToCanvas(x, y);
+}
+
+function distToCanvas(m) {
+  return S.cameraMode ? arenaDistToCanvasAR(m) : mapDistToCanvas(m);
+}
+
+// ============================================================
+// WebSocket
+// ============================================================
+let ws = null;
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/api/control`);
+  ws.onopen = () => {
+    S.wsConnected = true;
+    const ids = Object.keys(S.robots).map(Number);
+    if (ids.length) ws.send(JSON.stringify({ type: 'subscribe', robot_ids: ids }));
+  };
+  ws.onmessage = e => {
+    try { const m = JSON.parse(e.data); handleMsg(m); } catch {}
+  };
+  ws.onclose = () => { S.wsConnected = false; setTimeout(connectWS, 2000); };
+  ws.onerror = () => { S.wsConnected = false; };
+}
+
+function handleMsg(m) {
+  if (m.type === 'pose') {
+    const r = S.robots[m.robot_id];
+    if (r) { r.x = m.x; r.y = m.y; r.theta = m.theta; }
+  }
+}
+
+// ============================================================
+// REST fetching
+// ============================================================
+async function fetchRobots() {
+  try {
+    const r = await fetch('/robots'); const d = await r.json();
+    if (!Array.isArray(d)) return;
+    const ids = new Set(d.map(r => r.robot_id));
+    for (const id of Object.keys(S.robots)) if (!ids.has(Number(id))) delete S.robots[id];
+    for (const r of d) {
+      if (!S.robots[r.robot_id]) S.robots[r.robot_id] = r;
+      else Object.assign(S.robots[r.robot_id], r);
+    }
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'subscribe', robot_ids: d.map(r => r.robot_id) }));
+  } catch {}
+}
+
+async function fetchArena() {
+  try { const r = await fetch('/arena/model'); if (r.ok) S.arenaModel = await r.json(); } catch {}
+}
+
+async function fetchHomography() {
+  try { const r = await fetch('/arena/homography'); if (r.ok) S.homography = await r.json(); } catch {}
+}
+
+async function fetchPixelDetections() {
+  try { const r = await fetch('/tags/detections'); if (r.ok) S.pixelDetections = await r.json(); } catch {}
+}
+
+async function fetchAll() {
+  await Promise.all([fetchRobots(), fetchArena(), fetchHomography(), fetchPixelDetections()]);
+}
+
+// ============================================================
+// Rendering
+// ============================================================
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+
+function render() {
+  resize();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (S.cameraMode) {
+    renderCameraMode();
+  } else {
+    renderMapMode();
+  }
+
+  updateHUD();
+  requestAnimationFrame(render);
+}
+
+// --- Map mode (default, no camera needed) ---
+function renderMapMode() {
+  computeMapTransform();
+  if (!mapTransform) {
+    ctx.fillStyle = '#555';
+    ctx.font = '16px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('Waiting for arena model...', canvas.width / 2, canvas.height / 2);
+    return;
+  }
+
+  // Grid background
+  drawGrid();
+
+  if (S.showBoundary) drawBoundaryMap();
+  if (S.showObstacles) drawObstaclesMap();
+  if (S.showZones) drawZonesMap();
+  if (S.showRobots) drawRobotsMap();
+}
+
+function drawGrid() {
+  if (!mapTransform) return;
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  const step = 0.1; // 10cm grid
+  const { minX, minY, arenaW, arenaH } = mapTransform;
+  for (let x = Math.floor(minX / step) * step; x <= minX + arenaW; x += step) {
+    const p = mapArenaToCanvas(x, minY);
+    const q = mapArenaToCanvas(x, minY + arenaH);
+    if (p && q) { ctx.beginPath(); ctx.moveTo(p.cx, p.cy); ctx.lineTo(q.cx, q.cy); ctx.stroke(); }
+  }
+  for (let y = Math.floor(minY / step) * step; y <= minY + arenaH; y += step) {
+    const p = mapArenaToCanvas(minX, y);
+    const q = mapArenaToCanvas(minX + arenaW, y);
+    if (p && q) { ctx.beginPath(); ctx.moveTo(p.cx, p.cy); ctx.lineTo(q.cx, q.cy); ctx.stroke(); }
+  }
+}
+
+function drawPolygonMap(vertices, fill, stroke, lw) {
+  if (!vertices || vertices.length < 3) return;
+  const pts = vertices.map(v => mapArenaToCanvas(v[0], v[1])).filter(Boolean);
+  if (pts.length < 3) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].cx, pts[0].cy);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].cx, pts[i].cy);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 2; ctx.stroke(); }
+}
+
+function drawBoundaryMap() {
+  const m = S.arenaModel;
+  if (!m || !m.boundary || m.boundary.length < 3) return;
+  drawPolygonMap(m.boundary, 'rgba(34,197,94,0.08)', '#22c55e', 2);
+  // Origin marker at (0,0)
+  const o = mapArenaToCanvas(0, 0);
+  if (o) {
+    ctx.beginPath(); ctx.arc(o.cx, o.cy, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#22c55e'; ctx.fill();
+    if (S.showLabels) {
+      ctx.fillStyle = '#22c55e'; ctx.font = '10px system-ui'; ctx.textAlign = 'left';
+      ctx.fillText('origin', o.cx + 8, o.cy + 3);
+    }
+  }
+}
+
+function drawObstaclesMap() {
+  const m = S.arenaModel;
+  if (!m || !m.obstacles) return;
+  for (const obs of m.obstacles) {
+    drawPolygonMap(obs.vertices, 'rgba(120,120,120,0.5)', '#888', 1.5);
+    if (S.showLabels && obs.label) {
+      const c = centroid(obs.vertices);
+      const p = mapArenaToCanvas(c[0], c[1]);
+      if (p) { ctx.fillStyle = '#aaa'; ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.fillText(obs.label, p.cx, p.cy + 3); }
+    }
+  }
+}
+
+function drawZonesMap() {
+  const m = S.arenaModel;
+  if (!m || !m.zones) return;
+  for (const z of m.zones) {
+    const col = zoneColor(z.team);
+    drawPolygonMap(z.vertices, col + '22', col, 1.5);
+    if (S.showLabels && z.name) {
+      const c = centroid(z.vertices);
+      const p = mapArenaToCanvas(c[0], c[1]);
+      if (p) { ctx.fillStyle = col; ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.fillText(z.name, p.cx, p.cy + 3); }
+    }
+  }
+}
+
+function drawRobotsMap() {
+  for (const robot of Object.values(S.robots)) {
+    const cp = mapArenaToCanvas(robot.x, robot.y);
+    if (!cp) continue;
+    drawRobotAt(cp, robot, mapDistToCanvas(robot.radius || 0.028));
+  }
+}
+
+// --- Camera mode (AR overlay on camera feed) ---
+function renderCameraMode() {
+  computeARTransform();
+
+  // Use AR transform to draw arena elements on camera feed
+  if (arTransform) {
+    // Draw arena elements using the affine transform (arena coords -> pixel -> canvas)
+    if (S.showBoundary) drawBoundaryCameraAR();
+    if (S.showObstacles) drawObstaclesCameraAR();
+    if (S.showZones) drawZonesCameraAR();
+    if (S.showRobots) drawRobotsCameraAR();
+  }
+
+  // Also draw detected tag markers from pixel positions (always accurate)
+  const det = S.pixelDetections;
+  if (det && det.robot_tags && S.showRobots) {
+    for (const tag of det.robot_tags) {
+      const cp = pixelToCanvas(tag.center[0], tag.center[1]);
+      if (!cp) continue;
+      ctx.save();
+      ctx.translate(cp.cx, cp.cy);
+      ctx.rotate(Math.PI / 4);
+      ctx.strokeStyle = '#06b6d4'; ctx.lineWidth = 1.5;
+      ctx.strokeRect(-6, -6, 12, 12);
+      ctx.restore();
+      if (S.showLabels) {
+        ctx.fillStyle = '#06b6d4'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+        ctx.fillText(`tag:${tag.tag_id}`, cp.cx, cp.cy - 12);
+      }
+    }
+  }
+}
+
+function drawPolygonAR(vertices, fill, stroke, lw) {
+  if (!vertices || vertices.length < 3) return;
+  const pts = vertices.map(v => arenaToCanvasAR(v[0], v[1])).filter(Boolean);
+  if (pts.length < 3) return;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].cx, pts[0].cy);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].cx, pts[i].cy);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 2; ctx.stroke(); }
+}
+
+function drawBoundaryCameraAR() {
+  const m = S.arenaModel;
+  if (!m || !m.boundary || m.boundary.length < 3) return;
+  drawPolygonAR(m.boundary, 'rgba(34,197,94,0.1)', '#22c55e', 2);
+}
+
+function drawObstaclesCameraAR() {
+  const m = S.arenaModel;
+  if (!m || !m.obstacles) return;
+  for (const obs of m.obstacles) {
+    drawPolygonAR(obs.vertices, 'rgba(120,120,120,0.4)', '#888', 1.5);
+    if (S.showLabels && obs.label) {
+      const c = centroid(obs.vertices);
+      const p = arenaToCanvasAR(c[0], c[1]);
+      if (p) { ctx.fillStyle = '#ccc'; ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.fillText(obs.label, p.cx, p.cy + 3); }
+    }
+  }
+}
+
+function drawZonesCameraAR() {
+  const m = S.arenaModel;
+  if (!m || !m.zones) return;
+  for (const z of m.zones) {
+    const col = zoneColor(z.team);
+    drawPolygonAR(z.vertices, col + '22', col, 1.5);
+    if (S.showLabels && z.name) {
+      const c = centroid(z.vertices);
+      const p = arenaToCanvasAR(c[0], c[1]);
+      if (p) { ctx.fillStyle = col; ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.fillText(z.name, p.cx, p.cy + 3); }
+    }
+  }
+}
+
+function drawRobotsCameraAR() {
+  for (const robot of Object.values(S.robots)) {
+    const cp = arenaToCanvasAR(robot.x, robot.y);
+    if (!cp) continue;
+    drawRobotAt(cp, robot, arenaDistToCanvasAR(robot.radius || 0.028));
+  }
+}
+
+// ============================================================
+// Shared robot drawing
+// ============================================================
+function drawRobotAt(cp, robot, r) {
+  const isVirtual = robot.type === 'virtual';
+  const col = robotColor(robot);
+
+  ctx.beginPath();
+  ctx.arc(cp.cx, cp.cy, r, 0, Math.PI * 2);
+  if (isVirtual) { ctx.setLineDash([4, 3]); ctx.fillStyle = col + '44'; }
+  else { ctx.setLineDash([]); ctx.fillStyle = col + '88'; }
+  ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Direction arrow using arena coordinates
+  const theta = robot.theta || 0;
+  const ad = (robot.radius || 0.028) * 2;
+  const fwd = S.cameraMode ? null : mapArenaToCanvas(robot.x + Math.cos(theta) * ad, robot.y + Math.sin(theta) * ad);
+  if (fwd) {
+    const dx = fwd.cx - cp.cx, dy = fwd.cy - cp.cy;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 1) {
+      const nx = dx / len, ny = dy / len;
+      const ax = cp.cx + nx * r * 1.5, ay = cp.cy + ny * r * 1.5;
+      ctx.beginPath(); ctx.moveTo(cp.cx, cp.cy); ctx.lineTo(ax, ay);
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      const px = -ny, py = nx;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(ax - nx * 5 + px * 2, ay - ny * 5 + py * 2);
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(ax - nx * 5 - px * 2, ay - ny * 5 - py * 2);
+      ctx.stroke();
+    }
+  }
+
+  if (S.showLabels) {
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText(robot.robot_id, cp.cx, cp.cy - r - 6);
+  }
+
+  if (S.selectedRobot === robot.robot_id) {
+    ctx.beginPath(); ctx.arc(cp.cx, cp.cy, r + 4, 0, Math.PI * 2);
+    ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+function robotColor(r) {
+  if (r.status === 'inactive') return '#6b7280';
+  if (r.status === 'error') return '#ef4444';
+  return '#22c55e';
+}
+
+function zoneColor(team) {
+  if (team === 'blue') return '#3b82f6';
+  if (team === 'red') return '#ef4444';
+  return '#a855f7';
+}
+
+function centroid(v) {
+  if (!v || !v.length) return [0, 0];
+  let sx = 0, sy = 0;
+  for (const p of v) { sx += p[0]; sy += p[1]; }
+  return [sx / v.length, sy / v.length];
+}
+
+// ============================================================
+// HUD
+// ============================================================
+function updateHUD() {
+  const robots = Object.values(S.robots);
+  const ph = robots.filter(r => r.type === 'physical').length;
+  const vi = robots.filter(r => r.type === 'virtual').length;
+  document.getElementById('hud-robots').textContent = `${ph}P + ${vi}V`;
+  document.getElementById('hud-dot').className = S.wsConnected ? 'dot on' : 'dot off';
+  document.getElementById('hud-status').textContent = S.wsConnected ? 'connected' : 'disconnected';
+  document.getElementById('hud-mode').textContent = S.cameraMode ? 'camera' : 'map';
+
+  const m = S.arenaModel;
+  if (m && m.boundary && m.boundary.length >= 3) {
+    const xs = m.boundary.map(v => v[0]), ys = m.boundary.map(v => v[1]);
+    const w = (Math.max(...xs) - Math.min(...xs)).toFixed(2);
+    const h = (Math.max(...ys) - Math.min(...ys)).toFixed(2);
+    document.getElementById('hud-arena').textContent = `${w} x ${h}m`;
+  } else {
+    document.getElementById('hud-arena').textContent = 'no boundary';
+  }
+}
+
+// ============================================================
+// Interaction
+// ============================================================
+canvas.classList.add('interactive');
+canvas.addEventListener('click', e => {
+  const mx = e.clientX, my = e.clientY;
+  let found = null;
+  for (const robot of Object.values(S.robots)) {
+    const cp = S.cameraMode ? null : mapArenaToCanvas(robot.x, robot.y);
+    if (!cp) continue;
+    const r = distToCanvas(robot.radius || 0.028);
+    if (Math.sqrt((mx - cp.cx) ** 2 + (my - cp.cy) ** 2) < r + 10) { found = robot; break; }
+  }
+  S.selectedRobot = found ? found.robot_id : null;
+  const detail = document.getElementById('detail');
+  if (found) {
+    detail.innerHTML = `<b>Robot ${found.robot_id}</b> | ${found.type} | tag:${found.tag_id} | ` +
+      `(${found.x.toFixed(3)}, ${found.y.toFixed(3)}) | theta: ${(found.theta * 180 / Math.PI).toFixed(1)} | ${found.status}`;
+    detail.classList.add('visible');
+  } else detail.classList.remove('visible');
+});
+
+// Toggles
+document.getElementById('toggle-camera').addEventListener('change', e => {
+  S.cameraMode = e.target.checked;
+  const img = document.getElementById('camera-feed');
+  if (S.cameraMode) {
+    const visionHost = location.hostname;
+    img.src = `http://${visionHost}:8081/camera/stream`;
+    img.classList.add('visible');
+  } else {
+    img.src = '';
+    img.classList.remove('visible');
+  }
+});
+document.getElementById('toggle-boundary').addEventListener('change', e => S.showBoundary = e.target.checked);
+document.getElementById('toggle-obstacles').addEventListener('change', e => S.showObstacles = e.target.checked);
+document.getElementById('toggle-zones').addEventListener('change', e => S.showZones = e.target.checked);
+document.getElementById('toggle-robots').addEventListener('change', e => S.showRobots = e.target.checked);
+document.getElementById('toggle-labels').addEventListener('change', e => S.showLabels = e.target.checked);
+
+// ============================================================
+// Startup
+// ============================================================
+async function init() {
+  await fetchAll();
+  connectWS();
+  requestAnimationFrame(render);
+  setInterval(fetchAll, 3000);
+}
+
+window.addEventListener('resize', resize);
+init();
+</script>
+</body>
+</html>

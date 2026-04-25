@@ -9,7 +9,7 @@ apriltag_settings:
   # Tag ID ranges
   tag_ranges:
     robots: [0, 15]         # IDs 0–15 are robot tags
-    boundary: [100, 103]    # IDs 100–103 are arena corners
+    boundary: [100, 199]    # IDs 100–199 are arena boundary tags (supports 3+ tags for any shape)
     origin: 101             # coordinate system origin
   
   # Detector parameters

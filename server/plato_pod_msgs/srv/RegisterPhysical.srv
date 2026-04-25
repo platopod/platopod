@@ -1,0 +1,13 @@
+# Register a physical robot from any localization backend
+string localization_id      # provider-specific ID (tag "3", "rover-1")
+string localization_source  # "camera_artag", "gps_imu", "rf_anchor"
+int32 radius_mm
+string udp_address
+int32 udp_port
+float64 x
+float64 y
+float64 theta
+---
+bool success
+int32 robot_id
+string message

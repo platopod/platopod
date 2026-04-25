@@ -1,0 +1,37 @@
+# CoT/ATAK Bridge Configuration
+# Maps Plato Pod arena coordinates to geographic lat/lon
+# and sends robot positions to ATAK devices via CoT protocol.
+
+geo_reference:
+  origin_lat: -35.2975      # UNSW Canberra campus (default)
+  origin_lon: 149.1012
+  origin_alt: 580.0          # metres above WGS84 ellipsoid
+  rotation_deg: 0.0           # arena x-axis clockwise from true north
+
+transport:
+  mode: udp_unicast           # udp_unicast | udp_multicast | tcp
+  host: "192.168.1.100"       # ATAK device or TAK Server IP
+  port: 6969
+
+publish:
+  pose_rate_hz: 2.0           # robot position update rate
+  stale_seconds: 30.0         # CoT event staleness timeout
+  arena_republish_seconds: 60.0
+
+inbound:
+  enabled: true
+  port: 4242                  # UDP listener for ATAK waypoints
+
+vehicle_roles:
+  # Override per robot ID. Unmatched robots use default_role.
+  default_role: "recon"
+  overrides:
+    1: "tank"
+    2: "apc"
+    3: "cbrn_recon"
+
+callsigns:
+  # Optional callsign overrides. Default: "POD-{id}"
+  1: "BLUE-01"
+  2: "BLUE-02"
+  3: "BLUE-03"

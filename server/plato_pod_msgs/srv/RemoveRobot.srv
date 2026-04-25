@@ -1,0 +1,5 @@
+# Remove a virtual robot (physical robots cannot be removed via API)
+int32 robot_id
+---
+bool success
+string message

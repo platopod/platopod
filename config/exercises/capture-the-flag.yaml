@@ -7,6 +7,11 @@ exercise:
   description: "Two teams compete to reach the opponent's flag zone while defending their own."
 
   arena:
+    boundary:
+      - [0.0, 0.0]
+      - [0.84, 0.0]
+      - [0.84, 0.59]
+      - [0.0, 0.59]
     boundary_tags: [100, 101, 102, 103]
     origin_tag: 101
     obstacles:

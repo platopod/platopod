@@ -1,0 +1,183 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <model name="recon">
+    <static>false</static>
+
+    <!-- Body: box 1.0 x 0.6 x 0.4 m, mass 500 kg -->
+    <link name="base_link">
+      <inertial>
+        <mass>500</mass>
+        <inertia>
+          <ixx>21.67</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>48.33</iyy><iyz>0</iyz>
+          <izz>56.67</izz>
+        </inertia>
+      </inertial>
+      <collision name="body_collision">
+        <geometry>
+          <box><size>1.0 0.6 0.4</size></box>
+        </geometry>
+      </collision>
+      <visual name="body_visual">
+        <geometry>
+          <box><size>1.0 0.6 0.4</size></box>
+        </geometry>
+        <material>
+          <ambient>0.25 0.25 0.25 1</ambient>
+          <diffuse>0.25 0.25 0.25 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- 2D Lidar sensor (360 deg, 100 m range, 10 Hz) -->
+      <sensor name="lidar" type="gpu_lidar">
+        <pose>0 0 0.22 0 0 0</pose>
+        <topic>scan</topic>
+        <update_rate>10</update_rate>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>6.283185</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.1</min>
+            <max>100.0</max>
+          </range>
+        </lidar>
+        <always_on>true</always_on>
+        <visualize>true</visualize>
+      </sensor>
+
+      <!-- IMU sensor (50 Hz) -->
+      <sensor name="imu" type="imu">
+        <update_rate>50</update_rate>
+        <always_on>true</always_on>
+      </sensor>
+
+      <!-- Contact sensor -->
+      <sensor name="contact" type="contact">
+        <contact>
+          <collision>body_collision</collision>
+        </contact>
+        <update_rate>10</update_rate>
+        <always_on>true</always_on>
+      </sensor>
+    </link>
+
+    <!-- Left wheel -->
+    <link name="left_wheel">
+      <pose>0 0.3 -0.15 -1.5708 0 0</pose>
+      <inertial>
+        <mass>5</mass>
+        <inertia>
+          <ixx>0.0042</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0042</iyy><iyz>0</iyz>
+          <izz>0.00625</izz>
+        </inertia>
+      </inertial>
+      <collision name="left_wheel_collision">
+        <geometry>
+          <cylinder><radius>0.05</radius><length>0.03</length></cylinder>
+        </geometry>
+      </collision>
+      <visual name="left_wheel_visual">
+        <geometry>
+          <cylinder><radius>0.05</radius><length>0.03</length></cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+          <diffuse>0.1 0.1 0.1 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <!-- Right wheel -->
+    <link name="right_wheel">
+      <pose>0 -0.3 -0.15 -1.5708 0 0</pose>
+      <inertial>
+        <mass>5</mass>
+        <inertia>
+          <ixx>0.0042</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0042</iyy><iyz>0</iyz>
+          <izz>0.00625</izz>
+        </inertia>
+      </inertial>
+      <collision name="right_wheel_collision">
+        <geometry>
+          <cylinder><radius>0.05</radius><length>0.03</length></cylinder>
+        </geometry>
+      </collision>
+      <visual name="right_wheel_visual">
+        <geometry>
+          <cylinder><radius>0.05</radius><length>0.03</length></cylinder>
+        </geometry>
+        <material>
+          <ambient>0.1 0.1 0.1 1</ambient>
+          <diffuse>0.1 0.1 0.1 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <!-- Caster (frictionless sphere) -->
+    <link name="caster">
+      <pose>-0.4 0 -0.18 0 0 0</pose>
+      <inertial>
+        <mass>2</mass>
+        <inertia>
+          <ixx>0.0005</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0005</iyy><iyz>0</iyz>
+          <izz>0.0005</izz>
+        </inertia>
+      </inertial>
+      <collision name="caster_collision">
+        <geometry>
+          <sphere><radius>0.02</radius></sphere>
+        </geometry>
+        <surface>
+          <friction>
+            <ode><mu>0</mu><mu2>0</mu2></ode>
+          </friction>
+        </surface>
+      </collision>
+    </link>
+
+    <!-- Joints -->
+    <joint name="left_wheel_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>left_wheel</child>
+      <axis><xyz>0 0 1</xyz></axis>
+    </joint>
+    <joint name="right_wheel_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>right_wheel</child>
+      <axis><xyz>0 0 1</xyz></axis>
+    </joint>
+    <joint name="caster_joint" type="ball">
+      <parent>base_link</parent>
+      <child>caster</child>
+    </joint>
+
+    <!-- Differential drive plugin -->
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+      <wheel_separation>0.6</wheel_separation>
+      <wheel_radius>0.05</wheel_radius>
+      <max_linear_acceleration>5.0</max_linear_acceleration>
+      <max_linear_velocity>40.0</max_linear_velocity>
+      <max_angular_velocity>1.5</max_angular_velocity>
+      <topic>cmd_vel</topic>
+      <odom_topic>odom</odom_topic>
+    </plugin>
+
+    <!-- Pose publisher -->
+    <plugin filename="gz-sim-pose-publisher-system" name="gz::sim::systems::PosePublisher">
+      <publish_link_pose>false</publish_link_pose>
+      <publish_model_pose>true</publish_model_pose>
+      <update_frequency>50</update_frequency>
+    </plugin>
+  </model>
+</sdf>

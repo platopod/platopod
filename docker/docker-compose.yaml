@@ -21,8 +21,10 @@ services:
     volumes:
       # Mount the project source into the ROS2 workspace
       - ../server:/ros2_ws/src/plato_pod
+      - ../server/plato_pod_msgs:/ros2_ws/src/plato_pod_msgs
       - ../config:/ros2_ws/config
       - ../web:/ros2_ws/web
+      - ../models:/ros2_ws/models
       - ../docker:/ros2_ws/docker
 
       # Persist colcon build artifacts between container restarts
@@ -30,8 +32,15 @@ services:
       - ros-install:/ros2_ws/install
       - ros-log:/ros2_ws/log
     devices:
-      # Camera — adjust device number if needed (check: ls /dev/video*)
+      # Camera devices — pass through all video devices
+      # Use v4l2-ctl --list-devices inside the container to find the right one
+      # C922 Pro Stream Webcam is typically /dev/video4
       - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+      - /dev/video2:/dev/video2
+      - /dev/video3:/dev/video3
+      - /dev/video4:/dev/video4
+      - /dev/video5:/dev/video5
     environment:
       - DISPLAY=${DISPLAY}
       - ROS_DOMAIN_ID=0

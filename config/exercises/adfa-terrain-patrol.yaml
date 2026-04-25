@@ -1,0 +1,112 @@
+# ADFA Terrain Patrol — Classroom Exercise with Real Terrain
+# Uses SRTM elevation data from the ADFA/UNSW Canberra campus area.
+# Desktop robots on a 0.84m arena map to ~840m of real terrain at 1000:1 scale.
+
+exercise:
+  id: "adfa-terrain-patrol"
+  name: "ADFA Terrain Patrol"
+  description: >
+    Classroom exercise using real terrain from the ADFA campus area.
+    Blue team patrols a sector while Red team attempts to infiltrate.
+    Gas/CBRN hazard present — CBRN recon robot must identify the source.
+    All units visible on ATAK with real geographic positions.
+
+  geo:
+    origin_lat: -35.2975
+    origin_lon: 149.1012
+    origin_alt: 580.0
+    rotation_deg: 0.0
+    scale_factor: 1000.0
+
+  terrain:
+    source: "geotiff"                         # or "numpy" for testing
+    geotiff_path: "terrain/canberra_srtm.tif"  # pre-downloaded SRTM tile
+    bounding_box:
+      north: -35.293
+      south: -35.302
+      east: 149.107
+      west: 149.095
+    max_elevation: 40.0
+    heightmap_size: 257
+
+  arena:
+    boundary:
+      - [0.0, 0.0]
+      - [0.84, 0.0]
+      - [0.84, 0.59]
+      - [0.0, 0.59]
+    boundary_tags: [100, 101, 102, 103]
+    origin_tag: 101
+    obstacles:
+      - type: rectangle
+        x: 0.42
+        y: 0.29
+        width: 0.05
+        height: 0.15
+        label: "building_alpha"
+
+  teams:
+    - name: "blue"
+      colour: "#3B82F6"
+    - name: "red"
+      colour: "#EF4444"
+
+  robots:
+    physical:
+      - tag_id: 1
+        team: "blue"
+        vehicle_role: "recon"
+        sensor_preset: "full_suite"
+      - tag_id: 2
+        team: "blue"
+        vehicle_role: "cbrn_recon"
+        sensor_preset: "gas_scout"
+      - tag_id: 3
+        team: "red"
+        vehicle_role: "recon"
+        sensor_preset: "full_suite"
+      - tag_id: 4
+        team: "red"
+        vehicle_role: "tank"
+        sensor_preset: "basic_scout"
+    virtual: []
+
+  rules:
+    max_linear_speed: 0.15
+    max_angular_speed: 1.5
+    sensor_config_locked: true
+    friendly_fire: false
+    duration_minutes: 15
+
+  scoring:
+    type: "zone_capture"
+    zones:
+      - name: "blue_hq"
+        type: circle
+        x: 0.15
+        y: 0.3
+        radius: 0.08
+        team: "red"
+        hold_time_seconds: 15
+      - name: "red_approach"
+        type: circle
+        x: 0.7
+        y: 0.45
+        radius: 0.06
+        team: "blue"
+        hold_time_seconds: 10
+
+  virtual_layers:
+    gas_sources:
+      - name: "cbrn_hazard"
+        x: 0.5
+        y: 0.35
+        release_rate: 500.0
+        wind_speed: 3.0
+        wind_direction: 0.785     # NE wind
+        diffusion_coeff: 0.1
+
+    environment:
+      wind_speed: 3.0
+      wind_direction: 0.785
+      temperature: 18.0

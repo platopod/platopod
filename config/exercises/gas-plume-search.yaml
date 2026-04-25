@@ -1,0 +1,83 @@
+# Gas Plume Search — AR Military Exercise Template
+# Physical robots search for a virtual gas source using virtual MOX sensors.
+# All coordinates in metres relative to AprilTag 101 (arena origin).
+
+exercise:
+  id: "gas-plume-search"
+  name: "Gas Plume Search"
+  description: >
+    Robots must locate the source of a virtual gas plume using their virtual
+    MOX gas sensors. The plume disperses downwind from a hidden source.
+    Teams compete to find and report the source location first.
+
+  arena:
+    boundary:
+      - [0.0, 0.0]
+      - [0.84, 0.0]
+      - [0.84, 0.59]
+      - [0.0, 0.59]
+    boundary_tags: [100, 101, 102, 103]
+    origin_tag: 101
+    obstacles:
+      - type: rectangle
+        x: 0.42
+        y: 0.29
+        width: 0.05
+        height: 0.15
+        label: "building"
+
+  teams:
+    - name: "alpha"
+      colour: "#3B82F6"
+    - name: "bravo"
+      colour: "#EF4444"
+
+  robots:
+    physical:
+      - tag_id: 1
+        team: "alpha"
+        sensor_preset: "gas_scout"
+      - tag_id: 2
+        team: "alpha"
+        sensor_preset: "gas_scout"
+      - tag_id: 3
+        team: "bravo"
+        sensor_preset: "gas_scout"
+      - tag_id: 4
+        team: "bravo"
+        sensor_preset: "gas_scout"
+    virtual: []
+
+  rules:
+    max_linear_speed: 0.15
+    max_angular_speed: 1.5
+    sensor_config_locked: true
+    friendly_fire: false
+    duration_minutes: 10
+
+  scoring:
+    type: "source_localization"
+    zones:
+      - name: "gas_source_zone"
+        type: circle
+        x: 0.7
+        y: 0.45
+        radius: 0.05
+        team: ""
+        hold_time_seconds: 5
+
+  # Virtual data layers — these are loaded by the platform at exercise start
+  virtual_layers:
+    gas_sources:
+      - name: "gas"
+        x: 0.7
+        y: 0.45
+        release_rate: 200.0
+        wind_speed: 1.5
+        wind_direction: 0.0       # wind blows in +X direction
+        diffusion_coeff: 0.03
+
+    environment:
+      wind_speed: 1.5
+      wind_direction: 0.0
+      temperature: 22.0

@@ -1,0 +1,9 @@
+# Spawn a virtual robot at the given position
+float64 x
+float64 y
+float64 theta
+float64 radius
+---
+bool success
+int32 robot_id
+string message
