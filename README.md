@@ -2,9 +2,9 @@
 
 **An augmented reality tactical simulation platform for military training exercises.**
 
-Plato Pod operates at multiple physical scales — from desktop arenas with small differential-drive robots localised by AprilTag cameras, to outdoor exercises with GPS/IMU-equipped units. Physical and virtual elements coexist on the same arena: real robots interact with virtual units, gas plumes, terrain overlays, and engagement rules to create tactical training scenarios.
+Plato Pod creates tactical training scenarios where physical and virtual elements coexist on the same arena. Small robots on a desktop represent real military vehicles moving through real geographic terrain. Virtual units, CBRN hazards, terrain effects, and engagement rules are layered on top. The result appears on ATAK military tablets as a standard tactical picture — operators cannot tell which units are physical and which are virtual.
 
-Four simulation modes: **lightweight** (Python kinematics), **Gazebo** (3D physics), **Gazebo terrain** (real DEM heightmaps + sensor bridging), or **replay** (GPS track playback). Switch with one launch argument.
+The platform operates at any scale: a classroom desk, an indoor facility, or an outdoor training area with GPS-equipped units. The same exercise definition drives all scales.
 
 ## Architecture
 
@@ -34,20 +34,15 @@ Four simulation modes: **lightweight** (Python kinematics), **Gazebo** (3D physi
         └───────────┘ └─────────┘ └─────────────┘
 ```
 
-## Key Features
+## Key Capabilities
 
-- **Multi-scale** — desktop arenas (AprilTag camera), indoor (RF anchors), outdoor (GPS/IMU)
-- **Mixed reality** — physical and virtual units coexist with virtual gas plumes, terrain, enemies
-- **Real terrain** — DEM heightmap pipeline loads real geographic data into Gazebo
-- **ATAK integration** — MIL-STD-2525B symbols on military tablets, bidirectional waypoints
-- **Gazebo sensor bridge** — physics-accurate lidar, IMU from Gazebo (GPU or CPU fallback)
-- **GADEN gas simulation** — filament-based gas dispersion with MOX sensor digital twin
-- **Ghost models** — desktop robots get scaled virtual counterparts in Gazebo terrain
-- **Exercise replay** — load GPS tracks from prior exercises, replay on real terrain
-- **Scale factor** — 0.84m desktop arena represents 840m of real terrain at 1000:1
-- **4 vehicle types** — platopod, tank, APC, recon with MIL-STD type codes
-- **Python SDK** — synchronous API for autonomous robot programming
-- **618 unit tests** — all run without ROS2 or hardware
+- **Scale-agnostic** — the same exercise runs on a desktop arena or on real terrain with GPS-equipped units. The platform handles the coordinate mapping.
+- **Mixed reality** — physical robots interact with virtual units, CBRN hazards, terrain effects, and engagement rules on the same arena.
+- **Real terrain** — load elevation data from real geographic regions into Gazebo for physics-accurate simulation and sensor generation.
+- **ATAK interoperability** — all units appear as MIL-STD-2525B symbols on military tablets. Operators can send waypoints back from ATAK.
+- **Physics-accurate sensors** — lidar, IMU, and gas sensors computed by Gazebo's physics engine, with Python fallbacks when Gazebo is not running.
+- **Exercise replay** — record GPS tracks from real field exercises, replay them in the classroom on the same terrain.
+- **Programmable** — Python SDK for autonomous robot control. Students write algorithms; the platform handles localisation, sensors, and safety.
 
 ## Repository Structure
 
@@ -58,7 +53,7 @@ platopod/
 │   ├── src/plato_pod/     #   node implementations + domain logic
 │   ├── launch/            #   ROS2 launch files
 │   ├── config/            #   arena and sensor configuration
-│   └── tests/             #   618 unit tests
+│   └── tests/             #   unit tests
 ├── models/                # Gazebo SDF vehicle models (platopod, tank, APC, recon)
 ├── hardware/              # PCB designs (KiCad) and 3D-printable chassis
 ├── web/                   # Web dashboard (HTML/JS) + Python SDK
@@ -91,15 +86,19 @@ cd docker && docker compose up -d && docker compose exec ros bash
 # Inside container
 cd /ros2_ws && colcon build && source install/setup.bash
 
-# Lightweight mode (no Gazebo, no camera)
+# Physical robots on a desk (camera required)
+ros2 launch plato_pod classroom.launch.py camera_device:=4 \
+  exercise_file:=/ros2_ws/config/exercises/capture-the-flag.yaml
+
+# Virtual only (no camera, no robots)
 ros2 launch plato_pod atak_test.launch.py \
-  exercise_file:=/ros2_ws/config/exercises/capture-the-flag.yaml \
-  target_host:=192.168.1.42
+  exercise_file:=/ros2_ws/config/exercises/capture-the-flag.yaml
 
 # Gazebo with real terrain
 ros2 launch plato_pod simulation.launch.py mode:=gazebo_terrain \
-  exercise_file:=/ros2_ws/config/exercises/adfa-terrain-patrol.yaml \
-  scale_factor:=1000
+  exercise_file:=/ros2_ws/config/exercises/adfa-terrain-patrol.yaml
+
+# Dashboard: http://localhost:8080/
 ```
 
 ### Python SDK
@@ -121,11 +120,13 @@ while True:
 
 ## Exercise Scenarios
 
-| Scenario | Description | Virtual layers |
-|----------|-------------|----------------|
-| **Capture the Flag** | Two teams compete to reach opponent's flag zone | Boundary enforcement, tag-freeze rules |
-| **Gas Plume Search** | Locate a virtual gas source using MOX sensors | Gaussian plume, MOX sensor dynamics |
-| **ADFA Terrain Patrol** | Patrol real ADFA campus terrain at 1000:1 scale | SRTM heightmap, CBRN hazard, ATAK output |
+| Scenario | Description |
+|----------|-------------|
+| **Capture the Flag** | Two teams compete to reach opponent's flag zone. Boundary enforcement, tag-freeze rules. |
+| **Gas Plume Search** | Locate a virtual CBRN source using gas sensors. Gaussian plume dispersion with MOX sensor dynamics. |
+| **ADFA Terrain Patrol** | Patrol real ADFA campus terrain. SRTM elevation data, CBRN hazard, ATAK tactical picture. |
+
+See `server/README.md` for full scenario documentation, ATAK integration guide, and classroom setup instructions.
 
 ## Team
 
