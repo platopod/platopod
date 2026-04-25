@@ -44,6 +44,27 @@ The platform operates at any scale: a classroom desk, an indoor facility, or an 
 - **Exercise replay** — record GPS tracks from real field exercises, replay them in the classroom on the same terrain.
 - **Programmable** — Python SDK for autonomous robot control. Students write algorithms; the platform handles localisation, sensors, and safety.
 
+## Relationship to TAK
+
+TAK (Team Awareness Kit) — ATAK, WinTAK, TAK VR — is a situational awareness and C2 display system used by the ADF and allied forces. It shows positions on a map and shares data between operators. **TAK does not simulate anything.**
+
+Plato Pod is the simulation engine that creates the tactical situation and feeds it to TAK. It generates the world: robot physics, virtual units, CBRN hazards, terrain interaction, sensor data, exercise rules, and scoring. The combined picture — physical and virtual — is sent to TAK via the Cursor on Target (CoT) protocol, where it appears as a standard tactical display indistinguishable from a real operation.
+
+```
+Plato Pod (creates the training battlespace)
+    │
+    │  CoT XML: unit positions, sensor readings, zones, hazards
+    │
+    ▼
+TAK Server (optional relay to all clients)
+    │
+    ├──► ATAK on tablets    (2D tactical map)
+    ├──► WinTAK on laptops  (2D tactical map)
+    └──► TAK VR in headsets (3D immersive view)
+```
+
+TAK can display a real operation or replay recorded data, but it cannot create a mixed-reality training exercise where physical robots interact with virtual threats on real terrain with scored objectives. That is what Plato Pod does — and it outputs to the same TAK ecosystem that operators use in real operations.
+
 ## Repository Structure
 
 ```

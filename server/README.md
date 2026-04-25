@@ -845,12 +845,23 @@ arena.close()
 | Dashboard empty | Check `curl http://localhost:8080/robots` — boundary tags may not be visible |
 | `robot_busy` error | Another student controls the robot. Wait 30s or ask them to stop |
 
-## ATAK Interoperability Testing
+## ATAK / TAK Integration
+
+Plato Pod sends the complete tactical picture to TAK clients via the Cursor on Target (CoT) protocol. All units — physical and virtual — appear as standard MIL-STD-2525B symbols. Sensor data, scoring zones, obstacles, and CBRN hazard overlays are included.
+
+**Two deployment options:**
+
+| Mode | Setup | Use case |
+|------|-------|----------|
+| **Direct** | CoT bridge sends UDP to each ATAK device | 1-5 devices, simple setup |
+| **TAK Server** | CoT bridge sends to TAK Server, which relays to all clients | 5+ operators, devices join/leave during exercise |
+
+For TAK Server, use [FreeTAKServer](https://github.com/FreeTAKTeam/FreeTakServer) (open source) or an official TAK Server. Point `target_host` at the server IP instead of an individual device.
 
 ### Prerequisites
 
-- **ATAK-CIV** on Android (Google Play, free), or **WinTAK** on Windows (tak.gov), or **iTAK** on iOS
-- Phone/device and workstation on the same network
+- **ATAK-CIV** on Android (Google Play, free), **WinTAK** on Windows (tak.gov), or **iTAK** on iOS
+- Device and server on the same network
 - Docker container running
 
 ### Quick Start
