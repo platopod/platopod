@@ -1,13 +1,12 @@
 # Plato Pod — Development Setup Guide
 
-Complete step-by-step instructions to go from zero to a running development environment with Docker, ROS2, and Claude Code.
+Complete step-by-step instructions to go from zero to a running development environment with Docker and ROS2.
 
 ## Prerequisites
 
 - Ubuntu 24.04 (native or WSL2)
 - Git installed (`sudo apt install git`)
 - Docker installed (see Step 1 if not)
-- Claude Code installed (see Step 4 if not)
 - GitHub account with access to https://github.com/platopod/platopod
 
 ---
@@ -41,35 +40,11 @@ docker run hello-world
 
 ---
 
-## Step 2: Create the orphan branch and push initial structure
+## Step 2: Clone and build
 
 ```bash
-# Navigate to your local clone of the repo
-cd ~/platopod    # or wherever your clone is
-
-# Create the orphan branch (clean, no shared history with main)
-git checkout --orphan v2-platform
-git rm -rf .
-
-# Unpack the initial structure (download platopod-v2-initial.zip from Claude first)
-unzip -o ~/Downloads/platopod-v2-initial.zip
-mv platopod-v2/* platopod-v2/.* .
-rmdir platopod-v2
-
-# Commit and push
-git add .
-git commit -m "v2-platform: Initial project structure with issues, Docker, and Claude Code instructions"
-git push origin v2-platform
-```
-
-Verify at https://github.com/platopod/platopod — you should see the `v2-platform` branch with the new structure.
-
----
-
-## Step 3: Build and start the Docker container
-
-```bash
-cd ~/platopod/docker
+git clone https://github.com/platopod/platopod.git
+cd platopod/docker
 
 # Build the image (takes 5-10 minutes the first time)
 docker compose build
@@ -77,35 +52,35 @@ docker compose build
 # Start the container in the background
 docker compose up -d
 
-# Verify it's running
-docker compose ps
-```
-
-**Test that it works:**
-
-```bash
 # Open a shell inside the container
 docker compose exec ros bash
 
-# Inside the container, verify ROS2 is available
-ros2 --help
-
-# Verify Python dependencies
-python3 -c "import shapely; import numpy; import fastapi; print('All dependencies OK')"
-
-# Exit the container shell
-exit
+# Inside the container — build and test
+cd /ros2_ws
+colcon build
+source install/setup.bash
+python3 -m pytest src/plato_pod/tests/ -v
 ```
 
-**Test camera access (if camera is plugged in):**
+---
+
+## Step 3: Verify the environment
+
+**ROS2 and Python dependencies:**
 
 ```bash
-docker compose exec ros bash
+# Inside the container
+ros2 --help
+python3 -c "import shapely; import numpy; import fastapi; print('All dependencies OK')"
+```
 
-# Check camera device
+**Camera access (if camera is plugged in):**
+
+```bash
+# Inside the container
 v4l2-ctl --list-devices
 
-# Quick capture test (saves one frame)
+# Quick capture test
 python3 -c "
 import cv2
 cap = cv2.VideoCapture(0)
@@ -113,100 +88,56 @@ ret, frame = cap.read()
 print(f'Camera OK: {frame.shape}' if ret else 'Camera FAILED')
 cap.release()
 "
-exit
 ```
 
-**Test WiFi dongle (if MT7612U is plugged in):**
+**WiFi dongle (if MT7612U is plugged in):**
 
 ```bash
-docker compose exec ros bash
-
-# Check wireless interfaces
+# Inside the container
 iw dev
-
 # You should see wlan1 (or similar) for the USB dongle
-# wlan0 is typically your laptop's built-in WiFi
-
-# Set up the AP (only when you need ESP32 robots to connect)
-sudo bash /ros2_ws/docker/setup_wifi_ap.sh wlan1
-
-exit
 ```
 
 ---
 
-## Step 4: Install Claude Code
+## Step 4: Run an exercise
+
+### Virtual only (no camera, no robots)
 
 ```bash
-# Claude Code requires Node.js 18+
-# Check if you have it:
-node --version
+# Inside the container
+ros2 launch plato_pod atak_test.launch.py \
+  exercise_file:=/ros2_ws/config/exercises/capture-the-flag.yaml
 
-# If not installed or too old:
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install nodejs
+# In another terminal, spawn virtual robots
+curl -X POST http://localhost:8080/robots/spawn \
+  -H 'Content-Type: application/json' -d '{"x":0.4,"y":0.3}'
 
-# Install Claude Code globally
-npm install -g @anthropic-ai/claude-code
-
-# Verify installation
-claude --version
+# Open dashboard: http://localhost:8080/
 ```
 
----
-
-## Step 5: Configure Claude Code for the project
+### Physical robots on desk arena
 
 ```bash
-# Navigate to the project root
-cd ~/platopod
+# Inside the container (camera required)
+ros2 launch plato_pod classroom.launch.py \
+  camera_device:=4 \
+  exercise_file:=/ros2_ws/config/exercises/capture-the-flag.yaml
 
-# Make sure you're on the v2-platform branch
-git checkout v2-platform
-
-# Launch Claude Code
-claude
+# Verify camera: http://localhost:8081/camera/stream/debug
+# Dashboard: http://localhost:8080/
 ```
 
-Claude Code will automatically read `CLAUDE.md` and understand:
-- The project architecture and all 10 issues
-- Coding standards and conventions
-- How to build and test inside Docker
-- The development workflow (propose → approve → implement → test)
-
----
-
-## Step 6: Start developing
-
-In Claude Code, tell it which issue to work on:
-
-```
-Let's start implementing Issue #1 (Dynamic Arena Boundary and Arena Model).
-Read the spec in docs/issues/issue_1_arena_boundary_and_model.md and propose
-an implementation plan.
-```
-
-Claude Code will:
-1. Read the issue specification
-2. Propose which files to create, key functions, and test approach
-3. Wait for your approval before writing code
-4. Implement incrementally, running tests after each change
-5. Present results for review
-
-**To run commands inside Docker from Claude Code**, use:
+### Gazebo with real terrain
 
 ```bash
-docker compose -f docker/docker-compose.yaml exec ros bash -c "cd /ros2_ws && colcon build"
-docker compose -f docker/docker-compose.yaml exec ros bash -c "cd /ros2_ws && python3 -m pytest src/plato_pod/tests/ -v"
+# Inside the container (GPU recommended)
+ros2 launch plato_pod simulation.launch.py mode:=gazebo_terrain \
+  exercise_file:=/ros2_ws/config/exercises/adfa-terrain-patrol.yaml \
+  scale_factor:=1000
 ```
 
-Or open a persistent shell in a separate terminal:
-
-```bash
-cd ~/platopod/docker
-docker compose exec ros bash
-# This terminal stays inside the container — use it for building and testing
-```
+See `server/README.md` for full documentation on all scenarios, ATAK integration, and the Python SDK.
 
 ---
 
@@ -216,78 +147,55 @@ docker compose exec ros bash
 
 ```bash
 # Terminal 1: Start Docker (if not already running)
-cd ~/platopod/docker
+cd platopod/docker
 docker compose up -d
 
 # Terminal 2: Open a shell inside Docker for building/testing
 docker compose exec ros bash
 
-# Terminal 3: Launch Claude Code
-cd ~/platopod
-claude
+# Inside Docker
+cd /ros2_ws && colcon build && source install/setup.bash
 ```
 
-### Building and testing (inside Docker, Terminal 2)
+### Building and testing
 
 ```bash
-# Build all ROS2 packages
+# Inside Docker
 cd /ros2_ws
+
+# Build
 colcon build
 source install/setup.bash
 
-# Run unit tests (fast, no ROS2 nodes needed)
-python3 -m pytest src/plato_pod/tests/unit/ -v
+# Run all unit tests (fast, no ROS2 nodes needed)
+python3 -m pytest src/plato_pod/tests/ -v
 
-# Run integration tests (needs ROS2 nodes running)
-ros2 launch plato_pod server.launch.py &
-sleep 5
-python3 -m pytest src/plato_pod/tests/integration/ -v
+# Run a specific test file
+python3 -m pytest src/plato_pod/tests/unit/test_spatial_field.py -v
 
-# Run a specific node for manual testing
-ros2 run plato_pod arena_model_node
-
-# Visual debugging with RViz2 (if X11 forwarding is set up)
-rviz2
+# Launch a specific node for manual testing
+ros2 run plato_pod arena_model_node --ros-args \
+  -p exercise_file:=/ros2_ws/config/exercises/capture-the-flag.yaml
 ```
 
-### Testing the Python SDK (outside Docker, on your host)
+### Python SDK (outside Docker)
 
 ```bash
-# Install the SDK (once)
-cd ~/platopod
-pip install -e server/  # or wherever the SDK package lives
+cd platopod/web/sdk
+pip install -e .
 
-# Run a test script
 python3 -c "
 from platopod import Arena
 arena = Arena('ws://localhost:8080/api/control')
 robots = arena.list_robots()
 print(f'Found {len(robots)} robots')
+arena.close()
 "
-```
-
-### Committing changes
-
-```bash
-cd ~/platopod
-git add .
-git commit -m "[component] description of change"
-git push origin v2-platform
-```
-
-### Ending a session
-
-```bash
-# Stop Docker container (preserves build cache)
-cd ~/platopod/docker
-docker compose down
-
-# Or leave it running if you'll continue later
 ```
 
 ---
 
-## Connecting Physical ESP32 Robots (when hardware arrives)
+## Connecting Physical ESP32 Robots
 
 ### 1. Set up WiFi AP
 
@@ -296,30 +204,23 @@ docker compose down
 sudo bash /ros2_ws/docker/setup_wifi_ap.sh wlan1
 ```
 
-### 2. Start the robot bridge node
-
-```bash
-# Inside Docker
-ros2 run plato_pod robot_bridge_node
-```
-
-### 3. Flash and connect an ESP32
+### 2. Flash an ESP32
 
 ```bash
 # On your host (ESP-IDF must be installed natively, not in Docker)
-cd ~/platopod/firmware
+cd platopod/firmware
 idf.py set-target esp32c3
-idf.py menuconfig   # set WiFi SSID=plato-arena, password=platopod123, agent IP=192.168.4.1
+idf.py menuconfig   # set WiFi SSID, password, server IP
 idf.py build
 idf.py flash monitor
 ```
 
-### 4. Verify connection
+### 3. Verify connection
 
 ```bash
-# Inside Docker — the robot should have registered via UDP
-ros2 topic list | grep robot
-# You should see /robot_1/cmd_vel, /robot_1/pose, etc.
+# Inside Docker — the robot should register via UDP
+curl http://localhost:8080/robots
+# Should show the robot with "type": "physical"
 ```
 
 ---
@@ -328,57 +229,21 @@ ros2 topic list | grep robot
 
 ### Docker container won't start
 ```bash
-# Check logs
 docker compose logs ros
-
-# Rebuild from scratch
 docker compose build --no-cache
 docker compose up -d
 ```
 
 ### Camera not detected inside Docker
 ```bash
-# On your host, check the device number
+# On host, check device number
 ls /dev/video*
-
-# If it's /dev/video2 instead of /dev/video0, edit docker-compose.yaml:
-# devices:
-#   - /dev/video2:/dev/video0
-docker compose down && docker compose up -d
-```
-
-### WiFi dongle not showing up
-```bash
-# On your host, check USB devices
-lsusb | grep -i mt7612
-# Should show: 0e8d:7612 MediaTek Inc. MT7612U
-
-# Check if the kernel driver loaded
-dmesg | tail -20 | grep mt76
-
-# Inside Docker, check interfaces
-iw dev
+# If it's /dev/video2, update camera_device parameter
 ```
 
 ### ROS2 nodes can't communicate
 ```bash
-# Check ROS_DOMAIN_ID matches across all terminals
 echo $ROS_DOMAIN_ID   # should be 0
-
-# Check that --net=host is in docker-compose.yaml
 docker inspect platopod-ros | grep NetworkMode
 # Should show: "NetworkMode": "host"
-```
-
-### Claude Code can't find the project
-```bash
-# Make sure you're in the repo root
-cd ~/platopod
-ls CLAUDE.md   # this file must exist
-
-# Make sure you're on the right branch
-git branch     # should show * v2-platform
-
-# Launch Claude Code from the repo root
-claude
 ```
