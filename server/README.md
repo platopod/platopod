@@ -858,6 +858,8 @@ Plato Pod sends the complete tactical picture to TAK clients via the Cursor on T
 
 For TAK Server, use [FreeTAKServer](https://github.com/FreeTAKTeam/FreeTakServer) (open source) or an official TAK Server. Point `target_host` at the server IP instead of an individual device.
 
+**See [`docs/tak-setup.md`](../docs/tak-setup.md) for a complete walkthrough of FreeTAKServer + WinTAK on Linux** (via CrossOver/Wine), including map source configuration and troubleshooting.
+
 ### Prerequisites
 
 - **ATAK-CIV** on Android (Google Play, free), **WinTAK** on Windows (tak.gov), or **iTAK** on iOS

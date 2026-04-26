@@ -105,7 +105,7 @@ class TestMakeShapeEvent:
         xml = make_shape_event("arena-1", points, label="Arena")
         root = ET.fromstring(xml)
         assert root.tag == "event"
-        assert root.get("type") == "u-d-f"
+        assert root.get("type") == "u-d-r"
 
     def test_correct_vertex_count(self) -> None:
         points = [(-35.0, 149.0), (-35.0, 149.1), (-35.1, 149.1), (-35.1, 149.0)]
@@ -113,6 +113,9 @@ class TestMakeShapeEvent:
         root = ET.fromstring(xml)
         links = root.findall(".//link")
         assert len(links) == 4
+        # All vertex links must have relation="c" (ATAK polygon format)
+        for link in links:
+            assert link.get("relation") == "c"
 
 
 class TestParseCotEvent:

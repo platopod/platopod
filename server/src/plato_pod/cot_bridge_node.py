@@ -45,40 +45,49 @@ class CotBridgeNode(Node):
         super().__init__("cot_bridge_node")
 
         # Parameters
-        self.declare_parameter("geo_origin_lat", -35.2975)
-        self.declare_parameter("geo_origin_lon", 149.1012)
-        self.declare_parameter("geo_origin_alt", 580.0)
-        self.declare_parameter("geo_rotation_deg", 0.0)
-        self.declare_parameter("transport", "udp_unicast")
-        self.declare_parameter("target_host", "192.168.1.100")
-        self.declare_parameter("target_port", 6969)
-        self.declare_parameter("publish_rate_hz", 2.0)
-        self.declare_parameter("stale_seconds", 30.0)
-        self.declare_parameter("arena_republish_seconds", 60.0)
-        self.declare_parameter("inbound_port", 4242)
-        self.declare_parameter("default_vehicle_role", "recon")
-        self.declare_parameter("scale_factor", 1.0)
-        self.declare_parameter("publish_sensor_data", True)
-        self.declare_parameter("publish_zones", True)
-        self.declare_parameter("publish_obstacles", True)
+        # Use dynamic_typing so ROS2 accepts any type for parameter overrides
+        # (avoids int/float/string type conflicts between launch files and node defaults)
+        from rcl_interfaces.msg import ParameterDescriptor
+        _dyn = ParameterDescriptor(dynamic_typing=True)
 
-        # Read parameters
-        origin_lat = self.get_parameter("geo_origin_lat").value
-        origin_lon = self.get_parameter("geo_origin_lon").value
-        origin_alt = self.get_parameter("geo_origin_alt").value
-        rotation_deg = self.get_parameter("geo_rotation_deg").value
-        transport_mode = self.get_parameter("transport").value
-        target_host = self.get_parameter("target_host").value
-        target_port = self.get_parameter("target_port").value
-        publish_rate = self.get_parameter("publish_rate_hz").value
-        self._stale_seconds = self.get_parameter("stale_seconds").value
-        arena_republish = self.get_parameter("arena_republish_seconds").value
-        inbound_port = self.get_parameter("inbound_port").value
-        self._default_role = self.get_parameter("default_vehicle_role").value
-        scale_factor = self.get_parameter("scale_factor").value
-        self._publish_sensor_data = self.get_parameter("publish_sensor_data").value
-        self._publish_zones = self.get_parameter("publish_zones").value
-        self._publish_obstacles = self.get_parameter("publish_obstacles").value
+        for name, default in [
+            ("geo_origin_lat", -35.2942),
+            ("geo_origin_lon", 149.164),
+            ("geo_origin_alt", 580.0),
+            ("geo_rotation_deg", 0.0),
+            ("transport", "udp_unicast"),
+            ("target_host", "192.168.1.100"),
+            ("target_port", 6969),
+            ("publish_rate_hz", 2.0),
+            ("stale_seconds", 30.0),
+            ("arena_republish_seconds", 60.0),
+            ("inbound_port", 4242),
+            ("default_vehicle_role", "recon"),
+            ("exercise_file", ""),
+            ("scale_factor", 1.0),
+            ("publish_sensor_data", True),
+            ("publish_zones", True),
+            ("publish_obstacles", True),
+        ]:
+            self.declare_parameter(name, default, _dyn)
+
+        # Read parameters with explicit type conversion
+        origin_lat = float(self.get_parameter("geo_origin_lat").value)
+        origin_lon = float(self.get_parameter("geo_origin_lon").value)
+        origin_alt = float(self.get_parameter("geo_origin_alt").value)
+        rotation_deg = float(self.get_parameter("geo_rotation_deg").value)
+        transport_mode = str(self.get_parameter("transport").value)
+        target_host = str(self.get_parameter("target_host").value)
+        target_port = int(float(self.get_parameter("target_port").value))
+        publish_rate = float(self.get_parameter("publish_rate_hz").value)
+        self._stale_seconds = float(self.get_parameter("stale_seconds").value)
+        arena_republish = float(self.get_parameter("arena_republish_seconds").value)
+        inbound_port = int(float(self.get_parameter("inbound_port").value))
+        self._default_role = str(self.get_parameter("default_vehicle_role").value)
+        scale_factor = float(self.get_parameter("scale_factor").value)
+        self._publish_sensor_data = bool(self.get_parameter("publish_sensor_data").value)
+        self._publish_zones = bool(self.get_parameter("publish_zones").value)
+        self._publish_obstacles = bool(self.get_parameter("publish_obstacles").value)
 
         # Geo reference
         self._geo = GeoReference(
@@ -104,9 +113,13 @@ class CotBridgeNode(Node):
         self._robot_sensors: dict[int, dict[str, dict]] = {}
         # robot_id -> {sensor_name -> latest reading dict}
 
-        # Vehicle role overrides (could come from config file)
+        # Vehicle role and callsign overrides — loaded from exercise YAML
         self._vehicle_roles: dict[int, str] = {}
         self._callsigns: dict[int, str] = {}
+
+        exercise_file = str(self.get_parameter("exercise_file").value)
+        if exercise_file:
+            self._load_roles_from_exercise(exercise_file)
 
         # Known robot IDs for dynamic sensor subscriptions
         self._subscribed_robots: set[int] = set()
@@ -146,6 +159,42 @@ class CotBridgeNode(Node):
             f"inbound on :{inbound_port}, "
             f"geo origin ({origin_lat:.4f}, {origin_lon:.4f})"
         )
+
+    def _load_roles_from_exercise(self, exercise_file: str) -> None:
+        """Load vehicle roles and callsigns from exercise YAML."""
+        try:
+            import yaml
+            with open(exercise_file) as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            self.get_logger().warning(f"Cannot load exercise for roles: {e}")
+            return
+
+        exercise = config.get("exercise", config)
+        robots = exercise.get("robots", {})
+        if isinstance(robots, dict):
+            all_robots = robots.get("physical", []) + robots.get("virtual", [])
+        else:
+            all_robots = robots
+
+        for r in all_robots:
+            rid = r.get("tag_id", r.get("id", r.get("robot_id")))
+            if rid is None:
+                continue
+            role = r.get("vehicle_role", "")
+            if role:
+                self._vehicle_roles[rid] = role
+            team = r.get("team", "")
+            callsign = r.get("callsign", "")
+            if callsign:
+                self._callsigns[rid] = callsign
+            elif team:
+                self._callsigns[rid] = f"{team.upper()}-{rid}"
+
+        if self._vehicle_roles:
+            self.get_logger().info(
+                f"Loaded vehicle roles: {self._vehicle_roles}"
+            )
 
     # --- Callbacks ---
 

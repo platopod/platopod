@@ -1,0 +1,93 @@
+# Capture the Flag — Dowsett Field, ADFA
+# Arena boundary matched to the real field dimensions at 150:1 scale.
+# Geo origin at the south-west corner of Dowsett Field.
+
+exercise:
+  id: "dowsett-field-ctf"
+  name: "Capture the Flag — Dowsett Field"
+  description: "Two teams compete on Dowsett Field. Arena maps to real field at 150:1 scale."
+
+  geo:
+    origin_lat: -35.293935
+    origin_lon: 149.166421
+    origin_alt: 580.0
+    rotation_deg: 0.0
+    scale_factor: 150.0
+
+  arena:
+    # 0.852m x 0.723m desk arena = 128m x 108m on Dowsett Field
+    boundary:
+      - [0.0, 0.0]
+      - [0.852, 0.0]
+      - [0.852, 0.723]
+      - [0.0, 0.723]
+    boundary_tags: [100, 101, 102, 103]
+    origin_tag: 101
+    obstacles:
+      - type: rectangle
+        x: 0.426
+        y: 0.2
+        width: 0.1
+        height: 0.02
+        label: "wall_north"
+      - type: rectangle
+        x: 0.426
+        y: 0.52
+        width: 0.1
+        height: 0.02
+        label: "wall_south"
+
+  teams:
+    - name: "blue"
+      colour: "#3B82F6"
+    - name: "red"
+      colour: "#EF4444"
+
+  robots:
+    physical:
+      - tag_id: 1
+        team: "blue"
+        vehicle_role: "tank"
+        sensor_preset: "basic_scout"
+      - tag_id: 2
+        team: "blue"
+        vehicle_role: "recon"
+        sensor_preset: "basic_scout"
+      - tag_id: 3
+        team: "red"
+        vehicle_role: "apc"
+        sensor_preset: "basic_scout"
+      - tag_id: 4
+        team: "red"
+        vehicle_role: "recon"
+        sensor_preset: "basic_scout"
+    virtual: []
+
+  rules:
+    max_linear_speed: 0.15
+    max_angular_speed: 1.5
+    sensor_config_locked: true
+    friendly_fire: false
+    duration_minutes: 5
+    tag_rules:
+      enabled: true
+      freeze_seconds: 5
+      immunity_after_unfreeze_seconds: 2
+
+  scoring:
+    type: "zone_capture"
+    zones:
+      - name: "blue_flag"
+        type: circle
+        x: 0.1
+        y: 0.36
+        radius: 0.05
+        team: "red"
+        hold_time_seconds: 10
+      - name: "red_flag"
+        type: circle
+        x: 0.75
+        y: 0.36
+        radius: 0.05
+        team: "blue"
+        hold_time_seconds: 10

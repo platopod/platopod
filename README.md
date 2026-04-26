@@ -65,6 +65,8 @@ TAK Server (optional relay to all clients)
 
 TAK can display a real operation or replay recorded data, but it cannot create a mixed-reality training exercise where physical robots interact with virtual threats on real terrain with scored objectives. That is what Plato Pod does — and it outputs to the same TAK ecosystem that operators use in real operations.
 
+**Tested clients:** WinTAK (Windows / Linux via CrossOver), ATAK-CIV (Android), iTAK (iOS). See [`docs/tak-setup.md`](docs/tak-setup.md) for setup instructions including FreeTAKServer deployment.
+
 ## Repository Structure
 
 ```
@@ -80,6 +82,7 @@ platopod/
 ├── web/                   # Web dashboard (HTML/JS) + Python SDK
 ├── config/
 │   └── exercises/         # Exercise YAML templates
+├── tools/                 # Standalone development utilities (CoT viewer)
 └── docs/                  # Architecture documentation
 ```
 
@@ -145,6 +148,7 @@ while True:
 |----------|-------------|
 | **Capture the Flag** | Two teams compete to reach opponent's flag zone. Boundary enforcement, tag-freeze rules. |
 | **Gas Plume Search** | Locate a virtual CBRN source using gas sensors. Gaussian plume dispersion with MOX sensor dynamics. |
+| **Dowsett Field CTF** | Capture the Flag mapped to real Dowsett Field at ADFA, with per-robot vehicle roles (tank, APC, recon) for ATAK display. |
 | **ADFA Terrain Patrol** | Patrol real ADFA campus terrain. SRTM elevation data, CBRN hazard, ATAK tactical picture. |
 
 See `server/README.md` for full scenario documentation, ATAK integration guide, and classroom setup instructions.

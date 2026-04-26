@@ -31,14 +31,14 @@ class ReplayNode(Node):
         super().__init__("replay_node")
 
         self.declare_parameter("exercise_file", "")
-        self.declare_parameter("playback_speed", 1.0)
-        self.declare_parameter("scale_factor", 1.0)
-        self.declare_parameter("tick_rate_hz", 10.0)
+        self.declare_parameter("playback_speed", 1)
+        self.declare_parameter("scale_factor", 1)
+        self.declare_parameter("tick_rate_hz", 10)
 
         exercise_file = self.get_parameter("exercise_file").value
-        self._playback_speed = self.get_parameter("playback_speed").value
-        scale_factor = self.get_parameter("scale_factor").value
-        tick_rate = self.get_parameter("tick_rate_hz").value
+        self._playback_speed = float(self.get_parameter("playback_speed").value) or 1.0
+        scale_factor = float(self.get_parameter("scale_factor").value) or 1.0
+        tick_rate = float(self.get_parameter("tick_rate_hz").value) or 10.0
 
         # Geo reference for coordinate conversion
         self._geo = GeoReference(

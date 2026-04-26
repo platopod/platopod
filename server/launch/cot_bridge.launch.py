@@ -21,6 +21,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument("inbound_port", default_value="4242"),
         DeclareLaunchArgument("default_vehicle_role", default_value="recon"),
         DeclareLaunchArgument("scale_factor", default_value="1.0"),
+        DeclareLaunchArgument("exercise_file", default_value=""),
 
         Node(
             package="plato_pod",
@@ -40,6 +41,7 @@ def generate_launch_description() -> LaunchDescription:
                 "inbound_port": LaunchConfiguration("inbound_port"),
                 "default_vehicle_role": LaunchConfiguration("default_vehicle_role"),
                 "scale_factor": LaunchConfiguration("scale_factor"),
+                "exercise_file": LaunchConfiguration("exercise_file"),
             }],
             output="screen",
         ),

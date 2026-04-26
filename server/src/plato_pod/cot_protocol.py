@@ -121,6 +121,17 @@ def make_sensor_detail(readings: dict[str, float], model_name: str = "") -> str:
     return "\n".join(parts)
 
 
+def _argb_hex_to_signed_int(argb_hex: str) -> int:
+    """Convert ARGB hex string (e.g. 'ff00ff00') to signed 32-bit int for ATAK."""
+    s = argb_hex.lstrip("#")
+    if len(s) == 6:
+        s = "ff" + s  # add full alpha
+    val = int(s, 16)
+    if val >= 0x80000000:
+        val -= 0x100000000
+    return val
+
+
 def make_shape_event(
     uid: str,
     points: list[tuple[float, float]],
@@ -129,6 +140,9 @@ def make_shape_event(
     stale_seconds: float = 60.0,
 ) -> str:
     """Generate a CoT shape event (polygon) for arena boundaries or plume contours.
+
+    Uses the ATAK/WinTAK drawing-shape XML format with signed-integer
+    colours and 'relation="c"' on link elements.
 
     Args:
         uid: Unique identifier.
@@ -143,23 +157,30 @@ def make_shape_event(
     now = _utc_now()
     stale = now + datetime.timedelta(seconds=stale_seconds)
 
+    stroke_int = _argb_hex_to_signed_int(color)
+    # Fill = same colour but ~20% alpha
+    fill_hex = "33" + color[2:] if len(color) >= 8 else "33" + color
+    fill_int = _argb_hex_to_signed_int(fill_hex)
+
     event = ET.Element("event")
     event.set("version", "2.0")
     event.set("uid", uid)
-    event.set("type", "u-d-f")  # drawing/shape/freeform
+    event.set("type", "u-d-r")  # drawing region (closed polygon)
     event.set("time", _iso_format(now))
     event.set("start", _iso_format(now))
     event.set("stale", _iso_format(stale))
-    event.set("how", "m-g")
+    event.set("how", "h-e")  # human-entered (drawing)
 
-    # First point as the event location
+    # Centroid as the event location
     if points:
+        clat = sum(p[0] for p in points) / len(points)
+        clon = sum(p[1] for p in points) / len(points)
         point = ET.SubElement(event, "point")
-        point.set("lat", f"{points[0][0]:.7f}")
-        point.set("lon", f"{points[0][1]:.7f}")
+        point.set("lat", f"{clat:.7f}")
+        point.set("lon", f"{clon:.7f}")
         point.set("hae", "0.0")
-        point.set("ce", "10.0")
-        point.set("le", "10.0")
+        point.set("ce", "9999999.0")
+        point.set("le", "9999999.0")
     else:
         point = ET.SubElement(event, "point")
         point.set("lat", "0"); point.set("lon", "0")
@@ -167,20 +188,38 @@ def make_shape_event(
 
     detail = ET.SubElement(event, "detail")
 
-    # Shape links
-    for lat, lon in points:
+    # Shape vertices — ATAK polygon format: type="b-m-p-c" marks them as
+    # control points of a shape (not standalone waypoints), relation="c"
+    # links them as part of this shape.
+    for i, (lat, lon) in enumerate(points):
         link = ET.SubElement(detail, "link")
+        link.set("uid", f"{uid}-pt-{i}")
+        link.set("type", "b-m-p-c")
+        link.set("relation", "c")
         link.set("point", f"{lat:.7f},{lon:.7f}")
 
-    # Stroke color
+    # Stroke and fill — ATAK expects signed-int values
     stroke = ET.SubElement(detail, "strokeColor")
-    stroke.set("value", color)
+    stroke.set("value", str(stroke_int))
+    weight = ET.SubElement(detail, "strokeWeight")
+    weight.set("value", "3.0")
+    fill = ET.SubElement(detail, "fillColor")
+    fill.set("value", str(fill_int))
+
+    # link_attr: alternate styling element used by some ATAK builds
+    link_attr = ET.SubElement(detail, "link_attr")
+    link_attr.set("line_color", str(stroke_int))
+    link_attr.set("line_thickness", "3")
+    link_attr.set("fill_color", str(fill_int))
+
+    # Persistent across stale (so it stays visible)
+    ET.SubElement(detail, "archive")
 
     if label:
-        lbl = ET.SubElement(detail, "labels_on")
-        lbl.set("value", "true")
         contact = ET.SubElement(detail, "contact")
         contact.set("callsign", label)
+        lbl = ET.SubElement(detail, "labels_on")
+        lbl.set("value", "true")
 
     return ET.tostring(event, encoding="unicode")
 

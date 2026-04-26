@@ -46,27 +46,29 @@ class GazeboBridgeNode(Node):
         super().__init__("gazebo_bridge_node")
 
         # Parameters
-        self.declare_parameter("exercise_file", "")
-        self.declare_parameter("headless", False)
-        self.declare_parameter("physics_step_size", 0.001)
-        self.declare_parameter("real_time_factor", 1.0)
-        self.declare_parameter("pose_publish_rate_hz", 50.0)
-        self.declare_parameter("model_path", "models")
-        self.declare_parameter("wall_height", 0.3)
-        self.declare_parameter("bridge_sensors", True)
-        self.declare_parameter("scale_factor", 1.0)
-        self.declare_parameter("ghost_update_rate_hz", 10.0)
+        from rcl_interfaces.msg import ParameterDescriptor
+        _dyn = ParameterDescriptor(dynamic_typing=True)
+        self.declare_parameter("exercise_file", "", _dyn)
+        self.declare_parameter("headless", False, _dyn)
+        self.declare_parameter("physics_step_size", 0.001, _dyn)
+        self.declare_parameter("real_time_factor", 1.0, _dyn)
+        self.declare_parameter("pose_publish_rate_hz", 50.0, _dyn)
+        self.declare_parameter("model_path", "models", _dyn)
+        self.declare_parameter("wall_height", 0.3, _dyn)
+        self.declare_parameter("bridge_sensors", True, _dyn)
+        self.declare_parameter("scale_factor", 1.0, _dyn)
+        self.declare_parameter("ghost_update_rate_hz", 10.0, _dyn)
 
         exercise_file = self.get_parameter("exercise_file").value
         headless = self.get_parameter("headless").value
-        physics_step = self.get_parameter("physics_step_size").value
-        rtf = self.get_parameter("real_time_factor").value
-        pose_rate = self.get_parameter("pose_publish_rate_hz").value
-        model_path = self.get_parameter("model_path").value
-        wall_height = self.get_parameter("wall_height").value
-        self._bridge_sensors = self.get_parameter("bridge_sensors").value
-        scale_factor = self.get_parameter("scale_factor").value
-        ghost_rate = self.get_parameter("ghost_update_rate_hz").value
+        physics_step = float(self.get_parameter("physics_step_size").value)
+        rtf = float(self.get_parameter("real_time_factor").value)
+        pose_rate = float(self.get_parameter("pose_publish_rate_hz").value)
+        model_path = str(self.get_parameter("model_path").value)
+        wall_height = float(self.get_parameter("wall_height").value)
+        self._bridge_sensors = bool(self.get_parameter("bridge_sensors").value)
+        scale_factor = float(self.get_parameter("scale_factor").value)
+        ghost_rate = float(self.get_parameter("ghost_update_rate_hz").value)
 
         # GPU detection
         self._gpu_available = _detect_gpu()

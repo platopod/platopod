@@ -31,12 +31,14 @@ class SensorEngineNode(Node):
     def __init__(self) -> None:
         super().__init__("sensor_engine_node")
 
-        self.declare_parameter("tick_rate_hz", 10.0)
-        self.declare_parameter("default_preset", "minimal")
-        self.declare_parameter("exercise_file", "")
-        self.declare_parameter("sensor_source", "python")  # "python" or "gazebo"
+        from rcl_interfaces.msg import ParameterDescriptor
+        _dyn = ParameterDescriptor(dynamic_typing=True)
+        self.declare_parameter("tick_rate_hz", 10.0, _dyn)
+        self.declare_parameter("default_preset", "minimal", _dyn)
+        self.declare_parameter("exercise_file", "", _dyn)
+        self.declare_parameter("sensor_source", "python", _dyn)
 
-        tick_rate = self.get_parameter("tick_rate_hz").value
+        tick_rate = float(self.get_parameter("tick_rate_hz").value)
         self._default_preset = self.get_parameter("default_preset").value
 
         # Sensor engine

@@ -39,7 +39,11 @@ def generate_launch_description() -> LaunchDescription:
     )
     target_port_arg = DeclareLaunchArgument(
         "target_port", default_value="4242",
-        description="ATAK CoT receive port (4242 is ATAK default SA input)",
+        description="ATAK CoT receive port (4242 = ATAK default, 8087 = FreeTAKServer TCP)",
+    )
+    transport_arg = DeclareLaunchArgument(
+        "transport", default_value="udp_unicast",
+        description="CoT transport: udp_unicast, udp_multicast, or tcp",
     )
     geo_origin_lat_arg = DeclareLaunchArgument(
         "geo_origin_lat", default_value="-35.2975",
@@ -52,6 +56,14 @@ def generate_launch_description() -> LaunchDescription:
     sensor_preset_arg = DeclareLaunchArgument(
         "default_preset", default_value="minimal",
         description="Default sensor preset for spawned robots",
+    )
+    gateway_port_arg = DeclareLaunchArgument(
+        "gateway_port", default_value="8080",
+        description="API gateway port (change if 8080 conflicts with FreeTAKServer)",
+    )
+    inbound_port_arg = DeclareLaunchArgument(
+        "inbound_port", default_value="4242",
+        description="UDP port to listen for inbound CoT events from ATAK",
     )
     scale_factor_arg = DeclareLaunchArgument(
         "scale_factor", default_value="1.0",
@@ -98,6 +110,9 @@ def generate_launch_description() -> LaunchDescription:
         PythonLaunchDescriptionSource(
             os.path.join(launch_dir, "gateway.launch.py")
         ),
+        launch_arguments={
+            "port": LaunchConfiguration("gateway_port"),
+        }.items(),
     )
 
     # CoT/ATAK bridge
@@ -108,9 +123,12 @@ def generate_launch_description() -> LaunchDescription:
         launch_arguments={
             "target_host": LaunchConfiguration("target_host"),
             "target_port": LaunchConfiguration("target_port"),
+            "transport": LaunchConfiguration("transport"),
             "geo_origin_lat": LaunchConfiguration("geo_origin_lat"),
             "geo_origin_lon": LaunchConfiguration("geo_origin_lon"),
             "scale_factor": LaunchConfiguration("scale_factor"),
+            "exercise_file": LaunchConfiguration("exercise_file"),
+            "inbound_port": LaunchConfiguration("inbound_port"),
         }.items(),
     )
 
@@ -118,10 +136,13 @@ def generate_launch_description() -> LaunchDescription:
         exercise_file_arg,
         target_host_arg,
         target_port_arg,
+        transport_arg,
         geo_origin_lat_arg,
         geo_origin_lon_arg,
         sensor_preset_arg,
         scale_factor_arg,
+        gateway_port_arg,
+        inbound_port_arg,
         registry,
         arena,
         simulation,
