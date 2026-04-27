@@ -221,6 +221,49 @@ def make_sensor_detail(readings: dict[str, float], model_name: str = "") -> str:
     return "\n".join(parts)
 
 
+def make_plume_contour_event(
+    uid: str,
+    points: list[tuple[float, float]],
+    threshold_value: float,
+    label: str = "",
+    color: str | None = None,
+    stale_seconds: float = 30.0,
+) -> str:
+    """Generate a CoT shape event for a single contamination contour.
+
+    A thin wrapper over `make_shape_event` that defaults the colour
+    based on the threshold magnitude, mirroring NATO CBRN doctrine:
+        red    (≥ 1000)  acute / IDLH zone
+        orange (≥  500)  cross-contamination zone
+        yellow (≥  100)  caution / detect threshold
+        green  ( else )  trace / clean transit
+
+    The caller can override `color` to use a custom palette.
+    """
+    if color is None:
+        color = _plume_color_for_threshold(threshold_value)
+    if not label:
+        label = f"≥{threshold_value:.0f} ppm"
+    return make_shape_event(
+        uid=uid,
+        points=points,
+        color=color,
+        label=label,
+        stale_seconds=stale_seconds,
+    )
+
+
+def _plume_color_for_threshold(threshold: float) -> str:
+    """ARGB hex colour for a CBRN contour by concentration magnitude."""
+    if threshold >= 1000:
+        return "ffff0000"   # red — acute / IDLH
+    if threshold >= 500:
+        return "ffff8000"   # orange — cross-contamination
+    if threshold >= 100:
+        return "ffffff00"   # yellow — caution
+    return "ff00ff00"        # green — trace
+
+
 def _argb_hex_to_signed_int(argb_hex: str) -> int:
     """Convert ARGB hex string (e.g. 'ff00ff00') to signed 32-bit int for ATAK."""
     s = argb_hex.lstrip("#")

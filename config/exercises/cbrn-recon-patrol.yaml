@@ -103,10 +103,21 @@ exercise:
 
   virtual_layers:
     gas_sources:
-      - position: [0.6, 0.6]
-        emission_rate_g_per_s: 50
-        diffusivity: 0.05
-        label: "Source-Alpha"
+      - name: "gas"
+        x: 0.6
+        y: 0.6
+        release_rate: 200.0
+        wind_speed: 2.0
+        wind_direction: 0.0      # blowing east (radians)
+        diffusion_coeff: 0.05
+
+  # Plume rendering: cot_bridge_node samples this field and emits nested
+  # CoT contour shapes to ATAK. Thresholds in the field's natural units.
+  cot_bridge:
+    plume_field: "gas"
+    plume_thresholds: [10.0, 100.0, 500.0]
+    plume_grid_size: 60
+    plume_simplify_m: 0.005
 
   sensors_available:
     - gas

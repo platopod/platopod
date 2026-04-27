@@ -127,6 +127,34 @@ boundary, plus an immediate flush whenever the corresponding world
 topic delivers a new sample. The cadet's ied_detector *sensor reading*
 remains a separate concern; this is the declarative hazard layer.
 
+**Plume contours (CBRN contamination zones).** `cot_bridge_node` loads
+spatial fields from the exercise YAML (gas plumes, etc.) and on a 5 s
+timer samples the configured field over the arena bounding box,
+extracts polygon contours at each threshold via marching-square cell
+unions in `plato_pod.plume_contour`, and emits them as nested CoT
+shape events using `make_plume_contour_event`. Default colour ramp
+follows NATO CBRN doctrine: red (≥1000) acute / IDLH, orange (≥500)
+cross-contamination, yellow (≥100) caution. Per-exercise overrides:
+
+```yaml
+exercise:
+  virtual_layers:
+    gas_sources:
+      - { name: "gas", x: 0.6, y: 0.6, release_rate: 200,
+          wind_speed: 2.0, wind_direction: 0.0, diffusion_coeff: 0.05 }
+  cot_bridge:
+    plume_field: "gas"
+    plume_thresholds: [10.0, 100.0, 500.0]
+    plume_grid_size: 60         # samples on the longer bbox axis
+    plume_simplify_m: 0.005     # Douglas-Peucker tolerance (arena m)
+```
+
+Both Python `GaussianPlumeField` (lightweight mode) and GADEN-bridged
+fields (Gazebo terrain mode) feed the same pipeline, because both
+implement the `SpatialField` protocol. The cadet's gas sensor reading
+the field at the robot's position is a separate concern; this is the
+operator-side visualisation.
+
 ## Exercise YAML — what's optional, what's new
 
 Existing exercises keep working unchanged. New optional sections all live in the `exercise:` block:

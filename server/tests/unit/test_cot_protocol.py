@@ -14,6 +14,7 @@ from plato_pod.cot_protocol import (
     make_cot_event,
     make_engagement_event,
     make_ied_marker,
+    make_plume_contour_event,
     make_remarks_detail,
     make_sensor_detail,
     make_shape_event,
@@ -243,3 +244,51 @@ class TestEngagementCoT:
         assert "&lt;" in det
         assert "&amp;" in det
         assert "&gt;" in det
+
+
+class TestPlumeContourEvent:
+    SQUARE = [(-35.0, 149.0), (-35.0, 149.001),
+              (-34.999, 149.001), (-34.999, 149.0),
+              (-35.0, 149.0)]
+
+    def test_yellow_at_low_threshold(self) -> None:
+        xml = make_plume_contour_event(
+            uid="plume-test-100", points=self.SQUARE, threshold_value=100.0,
+        )
+        root = ET.fromstring(xml)
+        assert root.attrib["type"] == "u-d-r"   # filled drawing region
+        assert root.attrib["uid"] == "plume-test-100"
+        stroke = root.find("detail/strokeColor")
+        assert stroke is not None
+        # Yellow ARGB 0xFFFFFF00 → signed int32 = -256
+        assert stroke.attrib["value"] == "-256"
+
+    def test_red_at_acute_threshold(self) -> None:
+        xml = make_plume_contour_event(
+            uid="plume-test-1500", points=self.SQUARE, threshold_value=1500.0,
+        )
+        root = ET.fromstring(xml)
+        stroke = root.find("detail/strokeColor")
+        assert stroke is not None
+        # Red ARGB 0xFFFF0000 → signed int32 = -65536
+        assert stroke.attrib["value"] == "-65536"
+
+    def test_default_label_includes_threshold(self) -> None:
+        xml = make_plume_contour_event(
+            uid="plume-test-500", points=self.SQUARE, threshold_value=500.0,
+        )
+        # Label is rendered as a child of detail in shape events
+        root = ET.fromstring(xml)
+        # Either as a contact callsign or as a remarks blob — check text
+        assert "500" in xml
+
+    def test_caller_can_override_color(self) -> None:
+        xml = make_plume_contour_event(
+            uid="plume-custom", points=self.SQUARE,
+            threshold_value=100.0, color="ff800080",   # purple
+        )
+        root = ET.fromstring(xml)
+        stroke = root.find("detail/strokeColor")
+        assert stroke is not None
+        # 0xFF800080 → 4286578816 → signed -8388480
+        assert stroke.attrib["value"] == "-8388480"

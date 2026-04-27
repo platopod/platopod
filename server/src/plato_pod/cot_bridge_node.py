@@ -12,6 +12,7 @@ import json
 import math
 import socket
 import threading
+import time
 
 import rclpy
 from rclpy.node import Node
@@ -40,6 +41,7 @@ from plato_pod.cot_protocol import (
     make_cot_event,
     make_engagement_event,
     make_ied_marker,
+    make_plume_contour_event,
     make_sensor_detail,
     make_shape_event,
     make_track_detail,
@@ -49,6 +51,8 @@ from plato_pod.cot_protocol import (
 )
 from plato_pod.cot_transport import CotTransport, create_transport
 from plato_pod.geo_reference import GeoReference
+from plato_pod.plume_contour import extract_contours
+from plato_pod.virtual_layer_loader import load_virtual_layers
 
 
 class CotBridgeNode(Node):
@@ -133,9 +137,18 @@ class CotBridgeNode(Node):
         self._vehicle_roles: dict[int, str] = {}
         self._callsigns: dict[int, str] = {}
 
+        # Spatial fields (gas plume, etc.) loaded from exercise YAML —
+        # used to render contamination contours to ATAK.
+        self._spatial_env = None    # EnvironmentContext | None
+        self._plume_field_name: str = "gas"
+        self._plume_thresholds: list[float] = [10.0, 100.0, 500.0]
+        self._plume_grid_size: int = 60
+        self._plume_simplify_m: float = 0.0
+
         exercise_file = str(self.get_parameter("exercise_file").value)
         if exercise_file:
             self._load_roles_from_exercise(exercise_file)
+            self._load_spatial_env(exercise_file)
 
         # Known robot IDs for dynamic sensor subscriptions
         self._subscribed_robots: set[int] = set()
@@ -176,6 +189,11 @@ class CotBridgeNode(Node):
         self._world_timer = self.create_timer(
             arena_republish, self._publish_world_entities,
         )
+        # Plume contours refresh more often — concentration evolves on the
+        # order of seconds, especially for analytic Gaussian plumes that
+        # depend on `t` for time-of-flight from the source.
+        self._plume_timer = self.create_timer(5.0, self._publish_plume_contours)
+        self._exercise_start_time = time.time()
 
         # Inbound listener (UDP)
         self._inbound_running = True
@@ -229,6 +247,51 @@ class CotBridgeNode(Node):
         if self._vehicle_roles:
             self.get_logger().info(
                 f"Loaded vehicle roles: {self._vehicle_roles}"
+            )
+
+    def _load_spatial_env(self, exercise_file: str) -> None:
+        """Load spatial fields (gas plumes, etc.) from exercise YAML.
+
+        Used to render CBRN contamination contours on ATAK. Optional —
+        when the exercise has no virtual_layers, this is a no-op.
+
+        The plume rendering parameters can be overridden in the exercise
+        YAML under `cot_bridge:`:
+          cot_bridge:
+            plume_field: "gas"
+            plume_thresholds: [10, 100, 500]
+            plume_grid_size: 60
+            plume_simplify_m: 0.5
+        """
+        try:
+            import yaml
+            with open(exercise_file) as f:
+                config = yaml.safe_load(f)
+        except Exception as e:
+            self.get_logger().warning(f"Cannot read exercise for plume: {e}")
+            return
+
+        try:
+            self._spatial_env = load_virtual_layers(config)
+        except Exception as e:
+            self.get_logger().warning(f"Cannot load virtual layers: {e}")
+            return
+
+        if self._spatial_env is None:
+            return
+
+        bridge_cfg = (config.get("exercise", config) or {}).get("cot_bridge", {}) or {}
+        self._plume_field_name = str(bridge_cfg.get("plume_field", "gas"))
+        thresholds = bridge_cfg.get("plume_thresholds")
+        if isinstance(thresholds, list) and thresholds:
+            self._plume_thresholds = [float(t) for t in thresholds]
+        self._plume_grid_size = int(bridge_cfg.get("plume_grid_size", 60))
+        self._plume_simplify_m = float(bridge_cfg.get("plume_simplify_m", 0.0))
+
+        if self._plume_field_name in self._spatial_env.fields:
+            self.get_logger().info(
+                f"Plume field '{self._plume_field_name}' loaded; "
+                f"thresholds={self._plume_thresholds}"
             )
 
     # --- Callbacks ---
@@ -502,6 +565,72 @@ class CotBridgeNode(Node):
             )
 
             self._transport.send(xml)
+
+    def _publish_plume_contours(self) -> None:
+        """Sample the gas plume field, contour it, and emit CoT shapes.
+
+        One nested polygon per threshold (low → wide yellow zone, high →
+        narrow red core). The arena bounding box is the contour domain;
+        if no boundary is known yet we skip this tick.
+        """
+        if self._spatial_env is None:
+            return
+        if self._plume_field_name not in self._spatial_env.fields:
+            return
+        if not self._arena_boundary:
+            return
+        field = self._spatial_env.fields[self._plume_field_name]
+
+        xs = [p[0] for p in self._arena_boundary]
+        ys = [p[1] for p in self._arena_boundary]
+        bbox = (min(xs), min(ys), max(xs), max(ys))
+
+        # Time argument for fields that depend on it (e.g. transient
+        # dispersion). Plain Gaussian plumes ignore `t`.
+        t = time.time() - self._exercise_start_time
+
+        try:
+            levels = extract_contours(
+                field, bbox,
+                thresholds=self._plume_thresholds,
+                grid_size=self._plume_grid_size,
+                time=t,
+                simplify_tolerance=self._plume_simplify_m,
+            )
+        except Exception as e:
+            self.get_logger().warning(f"Contour extraction failed: {e}")
+            return
+
+        for level in levels:
+            for i, polygon in enumerate(level.polygons):
+                try:
+                    geo_points = [
+                        self._geo.arena_to_latlon(x, y) for x, y in polygon
+                    ]
+                except Exception as e:
+                    self.get_logger().warning(
+                        f"Geo conversion for plume contour failed: {e}"
+                    )
+                    continue
+                # Stable UID per (threshold, component) so iTAK updates
+                # the existing shape rather than spawning duplicates.
+                uid = (
+                    f"platopod-plume-{self._plume_field_name}-"
+                    f"{int(level.threshold)}-{i}"
+                )
+                xml = make_plume_contour_event(
+                    uid=uid,
+                    points=geo_points,
+                    threshold_value=float(level.threshold),
+                    label=f"{self._plume_field_name} ≥{level.threshold:.0f}",
+                    stale_seconds=15.0,   # short — plumes evolve
+                )
+                try:
+                    self._transport.send(xml)
+                except Exception as e:
+                    self.get_logger().warning(
+                        f"Failed to send plume contour: {e}"
+                    )
 
     def _publish_world_entities(self) -> None:
         """Periodically emit CoT markers for civilians and IED hazards.
