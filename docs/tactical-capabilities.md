@@ -10,7 +10,7 @@ The contracts between tactical modules are typed ROS2 messages and services, def
 
 | Module | Responsibility |
 |---|---|
-| `engagement.py` | `evaluate_fire(actor, target, weapon, ...)` — PoK with range falloff, LoS, weather, civilians, suppression |
+| `engagement.py` | `evaluate_fire(actor, target, weapon, ...)` — PoK with range falloff, LoS, weather, civilians, suppression. Short-circuits with `rationale=target_already_<status>` if the target is non-operational (destroyed/incapacitated/frozen). |
 | `health.py` | `mobility_factor`, `fire_capability`, `apply_damage`, status thresholds (wounded/destroyed/incapacitated) |
 | `line_of_sight.py` | `has_line_of_sight(observer, target, terrain, cover_polygons, weather)` — terrain, cover, weather composition |
 | `weather.py` | `WeatherState`, `visibility_factor(weather, distance)` — drives sensor and engagement attenuation |
@@ -102,6 +102,20 @@ New `inject_event` types (admin-gated): `indirect_fire`, `resupply`, `casevac`, 
 - `make_ied_marker(uid, lat, lon, confidence, label)` → CBRN drawing type (`u-d-c-c`) for IED hazards.
 - `make_civilian_marker(uid, lat, lon, label)` → neutral civilian (`a-n-G`).
 - `make_remarks_detail(text)` → XML-escaped tap-to-view text.
+
+**Identity derivation.** `cot_bridge_node` resolves the CoT type and callsign
+for both the live unit symbol and the casualty marker from the **live**
+`team` and `vehicle_role` fields on `RobotStatus.msg` (published by the
+registry). When `team` is set, the callsign becomes `BLUE-<id>` /
+`RED-<id>` / `GREEN-<id>` and the CoT affiliation flips to friendly
+(`a-f-…`) or hostile (`a-h-…`) accordingly. Older YAML overrides keyed
+by `tag_id` are still honoured as a fallback for legacy configs that
+don't set the live fields per-spawn.
+
+**Casualty visibility.** Once a robot transitions to a non-operational
+status, its live symbol stops being redrawn but its record stays in the
+bridge's cache so the casualty marker can resolve the correct callsign
+and remain visible at the body's last known position.
 
 ## Exercise YAML — what's optional, what's new
 

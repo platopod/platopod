@@ -124,6 +124,25 @@ int32[] suppressed_targets
 string[] roe_violations
 ```
 
+**Common `rationale` values** (string is open-ended; these are the canonical
+ones emitted by the reference Python implementation):
+
+| `rationale` | When |
+|---|---|
+| `hit_clean` | LoS clear, PoK roll succeeded — `hit: true, damage > 0` |
+| `missed` | LoS clear, PoK roll failed — `hit: false, blocked: false` |
+| `blocked_by_<label>` | Cover polygon `<label>` intersected the LoS ray |
+| `blocked_by_terrain` | Terrain occluded the ray (Gazebo LoS backend) |
+| `out_of_visual_range` | Weather visibility < distance |
+| `out_of_range` | Distance > weapon `max_range_m` |
+| `target_already_<status>` | Target is non-operational (destroyed, incapacitated, frozen) — short-circuit; ammunition still expended |
+| `roe_blocked` | A `critical`-severity ROE violation prevented evaluation |
+| `unknown_weapon` | The named weapon isn't in the catalog |
+| `unknown_target` | `target_id < 0` *and* `has_target_position == false` |
+
+A C++/MATLAB consumer can string-match these for routing; alternatively
+ignore `rationale` and rely solely on the typed `hit`/`blocked`/`fired` flags.
+
 ### `Observation.msg`
 ```
 int32 actor_id
