@@ -55,8 +55,14 @@ def common_platopod_uid_groups() -> list[tuple[str, list[str]]]:
     """
     groups: list[tuple[str, list[str]]] = []
 
-    # Arena boundary — drawing rectangle
+    # Arena boundary, zones, obstacles — all drawing rectangles via
+    # make_shape_event. Sweep a wide index range since exercises can
+    # define many.
     groups.append(("u-d-r", ["platopod-arena"]))
+    groups.append(("u-d-r", [f"platopod-zone-{i}" for i in range(0, 50)]))
+    groups.append(("u-d-r", [f"platopod-obstacle-{i}" for i in range(0, 50)]))
+    groups.append(("u-d-f", [f"platopod-zone-{i}" for i in range(0, 50)]))
+    groups.append(("u-d-f", [f"platopod-obstacle-{i}" for i in range(0, 50)]))
 
     # Robots — friendly ground (a-f-G family) and hostile (a-h-G family).
     # Send both type guesses since spawn-time team determines which.
