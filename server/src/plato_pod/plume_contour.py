@@ -88,7 +88,11 @@ def extract_contours(
     ny = max(1, int(math.ceil((ymax - ymin) / resolution)))
 
     if simplify_tolerance <= 0:
-        simplify_tolerance = resolution / 2.0
+        # Aggressive default: ~2× the grid resolution. Trades a small
+        # boundary inaccuracy for dramatically fewer vertices on the
+        # ATAK display, where each vertex becomes a draggable handle.
+        # Result: ~6-8 vertices per polygon instead of ~14.
+        simplify_tolerance = resolution * 2.0
     if smooth_amount <= 0:
         smooth_amount = resolution * 1.5
     if min_polygon_area is None:

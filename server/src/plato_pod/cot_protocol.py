@@ -229,10 +229,12 @@ def make_plume_contour_event(
     color: str | None = None,
     stale_seconds: float = 30.0,
 ) -> str:
-    """Generate a CoT shape event for a single contamination contour.
+    """Generate a CoT freehand-polygon event for a contamination contour.
 
-    A thin wrapper over `make_shape_event` that defaults the colour
-    based on the threshold magnitude, mirroring NATO CBRN doctrine:
+    Uses CoT type `u-d-f` (User Drawing Freehand) rather than `u-d-r`
+    (User Drawing Rectangle) so ATAK renders the actual polygon outline
+    instead of its axis-aligned bounding box. Default colour follows
+    NATO CBRN doctrine by magnitude:
         red    (≥ 1000)  acute / IDLH zone
         orange (≥  500)  cross-contamination zone
         yellow (≥  100)  caution / detect threshold
@@ -243,10 +245,11 @@ def make_plume_contour_event(
     if color is None:
         color = _plume_color_for_threshold(threshold_value)
     if not label:
-        label = f"≥{threshold_value:.0f} ppm"
-    return make_shape_event(
+        label = f"≥{threshold_value:.0f}"
+    return _make_polygon_drawing(
         uid=uid,
         points=points,
+        cot_type="u-d-f",
         color=color,
         label=label,
         stale_seconds=stale_seconds,
@@ -356,6 +359,80 @@ def make_shape_event(
     link_attr.set("fill_color", str(fill_int))
 
     # Persistent across stale (so it stays visible)
+    ET.SubElement(detail, "archive")
+
+    if label:
+        contact = ET.SubElement(detail, "contact")
+        contact.set("callsign", label)
+        lbl = ET.SubElement(detail, "labels_on")
+        lbl.set("value", "true")
+
+    return ET.tostring(event, encoding="unicode")
+
+
+def _make_polygon_drawing(
+    uid: str,
+    points: list[tuple[float, float]],
+    cot_type: str,
+    color: str,
+    label: str = "",
+    stale_seconds: float = 30.0,
+) -> str:
+    """Generate a closed-polygon CoT drawing event with a custom CoT type.
+
+    Like `make_shape_event` but lets the caller choose the CoT type
+    (e.g. `u-d-f` freehand polygon vs. `u-d-r` rectangle). The mandatory
+    `<point>` element gets a degenerate accuracy footprint (ce/le very
+    large) so ATAK doesn't render a centroid marker on top of the shape.
+    """
+    now = _utc_now()
+    stale = now + datetime.timedelta(seconds=stale_seconds)
+
+    stroke_int = _argb_hex_to_signed_int(color)
+    fill_hex = "33" + color[2:] if len(color) >= 8 else "33" + color
+    fill_int = _argb_hex_to_signed_int(fill_hex)
+
+    event = ET.Element("event")
+    event.set("version", "2.0")
+    event.set("uid", uid)
+    event.set("type", cot_type)
+    event.set("time", _iso_format(now))
+    event.set("start", _iso_format(now))
+    event.set("stale", _iso_format(stale))
+    event.set("how", "h-e")
+
+    if points:
+        clat = sum(p[0] for p in points) / len(points)
+        clon = sum(p[1] for p in points) / len(points)
+    else:
+        clat = clon = 0.0
+    point = ET.SubElement(event, "point")
+    point.set("lat", f"{clat:.7f}")
+    point.set("lon", f"{clon:.7f}")
+    point.set("hae", "0.0")
+    point.set("ce", "9999999.0")
+    point.set("le", "9999999.0")
+
+    detail = ET.SubElement(event, "detail")
+    for i, (lat, lon) in enumerate(points):
+        link = ET.SubElement(detail, "link")
+        link.set("uid", f"{uid}-pt-{i}")
+        link.set("type", "b-m-p-c")
+        link.set("relation", "c")
+        link.set("point", f"{lat:.7f},{lon:.7f}")
+
+    stroke = ET.SubElement(detail, "strokeColor")
+    stroke.set("value", str(stroke_int))
+    weight = ET.SubElement(detail, "strokeWeight")
+    weight.set("value", "3.0")
+    fill = ET.SubElement(detail, "fillColor")
+    fill.set("value", str(fill_int))
+
+    link_attr = ET.SubElement(detail, "link_attr")
+    link_attr.set("line_color", str(stroke_int))
+    link_attr.set("line_thickness", "3")
+    link_attr.set("fill_color", str(fill_int))
+
     ET.SubElement(detail, "archive")
 
     if label:

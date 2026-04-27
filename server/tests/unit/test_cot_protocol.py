@@ -256,7 +256,10 @@ class TestPlumeContourEvent:
             uid="plume-test-100", points=self.SQUARE, threshold_value=100.0,
         )
         root = ET.fromstring(xml)
-        assert root.attrib["type"] == "u-d-r"   # filled drawing region
+        # Plume contours use u-d-f (drawing freehand polygon) rather than
+        # u-d-r (drawing rectangle) so ATAK renders the actual outline
+        # instead of the bounding-box rectangle of the link points.
+        assert root.attrib["type"] == "u-d-f"
         assert root.attrib["uid"] == "plume-test-100"
         stroke = root.find("detail/strokeColor")
         assert stroke is not None
