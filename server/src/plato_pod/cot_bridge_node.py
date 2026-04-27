@@ -592,10 +592,25 @@ class CotBridgeNode(Node):
         if no boundary is known yet we skip this tick.
         """
         if self._spatial_env is None:
+            self.get_logger().info(
+                "Plume tick skipped: no spatial environment loaded"
+                " (exercise_file param empty or virtual_layers missing)",
+                throttle_duration_sec=10.0,
+            )
             return
         if self._plume_field_name not in self._spatial_env.fields:
+            self.get_logger().info(
+                f"Plume tick skipped: field '{self._plume_field_name}' "
+                f"not found (available: {list(self._spatial_env.fields)})",
+                throttle_duration_sec=10.0,
+            )
             return
         if not self._arena_boundary:
+            self.get_logger().info(
+                "Plume tick skipped: no arena boundary received from "
+                "/arena/model (is arena_model_node running?)",
+                throttle_duration_sec=10.0,
+            )
             return
         field = self._spatial_env.fields[self._plume_field_name]
 
@@ -656,6 +671,19 @@ class CotBridgeNode(Node):
         # or the operator switching from polygon to ellipse rendering.
         self._send_tombstones(self._published_plume_uids - new_plume_uids)
         self._published_plume_uids = new_plume_uids
+
+        if new_plume_uids:
+            self.get_logger().info(
+                f"Plume tick published {len(new_plume_uids)} contour(s) "
+                f"({self._plume_render} mode): {sorted(new_plume_uids)}",
+                throttle_duration_sec=15.0,
+            )
+        else:
+            self.get_logger().info(
+                "Plume tick produced 0 contours — field below all thresholds "
+                "or extraction failed",
+                throttle_duration_sec=15.0,
+            )
 
     def _render_plume_polygon(
         self, uid: str, polygon: list[tuple[float, float]],
