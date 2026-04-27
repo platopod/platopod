@@ -350,9 +350,32 @@ class CotBridgeNode(Node):
             # Heading: arena theta (radians, 0=+x) → CoT course (degrees CW from north)
             course = math.degrees(-r["theta"]) % 360.0
 
-            role = self._vehicle_roles.get(robot_id, self._default_role)
-            cot_type = VEHICLE_ROLE_TO_COT_TYPE.get(role, "a-f-G")
-            callsign = self._callsigns.get(robot_id, f"POD-{robot_id}")
+            # Prefer live RobotStatus fields over the YAML overrides — the
+            # registry is authoritative now that team/vehicle_role are
+            # propagated via the typed contract. Fall back to YAML overrides
+            # for legacy configs that don't set them per-spawn.
+            live_role = r.get("vehicle_role") or ""
+            live_team = r.get("team") or ""
+            role = (
+                live_role
+                or self._vehicle_roles.get(robot_id)
+                or self._default_role
+            )
+
+            # Map team to CoT affiliation prefix when role doesn't already
+            # encode hostility. team=red → 'a-h-…', team=blue/green → 'a-f-…'.
+            base_cot_type = VEHICLE_ROLE_TO_COT_TYPE.get(role, "a-f-G")
+            if live_team == "red" and base_cot_type.startswith("a-f"):
+                cot_type = "a-h" + base_cot_type[3:]
+            elif live_team in ("blue", "green") and base_cot_type.startswith("a-h"):
+                cot_type = "a-f" + base_cot_type[3:]
+            else:
+                cot_type = base_cot_type
+
+            callsign = (
+                self._callsigns.get(robot_id)
+                or (f"{live_team.upper()}-{robot_id}" if live_team else f"POD-{robot_id}")
+            )
             uid = f"platopod-{robot_id}"
 
             detail = make_contact_detail(callsign)
