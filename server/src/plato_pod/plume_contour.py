@@ -88,15 +88,18 @@ def extract_contours(
     ny = max(1, int(math.ceil((ymax - ymin) / resolution)))
 
     if simplify_tolerance <= 0:
-        # Default 4× grid resolution. Each polygon vertex becomes a
-        # draggable control-point handle on ATAK; aggressive
-        # simplification drops the handle count to ~4-5 per polygon
-        # while still tracking the plume shape for operator awareness.
-        # YAML can lower this for higher fidelity at the cost of more
-        # handles, or raise it for a cleaner demo picture.
-        simplify_tolerance = resolution * 4.0
+        # 0.5× grid resolution preserves Douglas-Peucker detail; the
+        # morphological close (smooth_amount) dominates the final
+        # vertex count.
+        simplify_tolerance = resolution * 0.5
     if smooth_amount <= 0:
-        smooth_amount = resolution * 2.0
+        # 1.0× grid resolution rounds the cell-aligned boundary into a
+        # smooth curve while preserving ~15 vertices per polygon —
+        # enough for iTAK to render the actual contour shape (not its
+        # bounding box) without flooding the operator's screen with
+        # control-point handles. Going higher than 1.5× collapses
+        # polygons to 4 vertices, which iTAK then draws as rectangles.
+        smooth_amount = resolution * 1.0
     if min_polygon_area is None:
         min_polygon_area = 9.0 * resolution * resolution
 
