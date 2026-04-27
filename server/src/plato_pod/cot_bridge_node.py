@@ -45,6 +45,7 @@ from plato_pod.cot_protocol import (
     make_plume_ellipse_event,
     make_sensor_detail,
     make_shape_event,
+    make_tombstone_event,
     make_track_detail,
     parse_cot_event,
     parse_nav_goal,
@@ -129,6 +130,11 @@ class CotBridgeNode(Node):
         # World-state caches (filled from latched /world/* topics)
         self._civilians: list[dict] = []     # {x, y, label}
         self._ied_zones: list[dict] = []     # {x, y, detect_radius, label}
+        # Track UIDs we've published per category so we can tombstone
+        # any that disappear (scenario switch, runtime deletion, etc.).
+        self._published_civilian_uids: set[str] = set()
+        self._published_ied_uids: set[str] = set()
+        self._published_plume_uids: set[str] = set()
         self._robot_lock = threading.Lock()
         self._sensor_lock = threading.Lock()
         self._robot_sensors: dict[int, dict[str, dict]] = {}
@@ -615,6 +621,7 @@ class CotBridgeNode(Node):
             self.get_logger().warning(f"Contour extraction failed: {e}")
             return
 
+        new_plume_uids: set[str] = set()
         for level_idx, level in enumerate(levels):
             override_color = (
                 self._plume_colors[level_idx]
@@ -636,12 +643,19 @@ class CotBridgeNode(Node):
                 )
                 if xml is None:
                     continue
+                new_plume_uids.add(uid)
                 try:
                     self._transport.send(xml)
                 except Exception as e:
                     self.get_logger().warning(
                         f"Failed to send plume contour: {e}"
                     )
+
+        # Tombstone any plume UIDs that disappeared since the last tick —
+        # e.g., a contour shrinking below threshold, fragments merging,
+        # or the operator switching from polygon to ellipse rendering.
+        self._send_tombstones(self._published_plume_uids - new_plume_uids)
+        self._published_plume_uids = new_plume_uids
 
     def _render_plume_polygon(
         self, uid: str, polygon: list[tuple[float, float]],
@@ -701,22 +715,40 @@ class CotBridgeNode(Node):
             stale_seconds=15.0,
         )
 
+    def _send_tombstones(self, uids: set[str]) -> None:
+        """Tell ATAK/iTAK to forget each UID."""
+        for uid in uids:
+            try:
+                self._transport.send(make_tombstone_event(uid))
+            except Exception as e:
+                self.get_logger().warning(
+                    f"Failed to send tombstone for {uid}: {e}"
+                )
+        if uids:
+            self.get_logger().info(
+                f"Tombstoned {len(uids)} CoT UIDs: {sorted(uids)[:5]}"
+                + ("…" if len(uids) > 5 else "")
+            )
+
     def _publish_world_entities(self) -> None:
         """Periodically emit CoT markers for civilians and IED hazards.
 
         Each entity gets a stable UID derived from its label so iTAK
         updates the existing marker rather than spawning duplicates.
-        Stale time is set well above the republish period so markers
-        don't blink on slow networks.
+        UIDs that were published in a previous tick but no longer appear
+        in the world state get a tombstone event so iTAK drops them —
+        important when scenarios change at runtime.
         """
         # Civilians (neutral, a-n-G)
+        new_civ_uids: set[str] = set()
         for i, c in enumerate(self._civilians):
+            label = str(c.get("label") or f"civilian_{i}")
+            uid = f"platopod-civ-{label}"
+            new_civ_uids.add(uid)
             try:
                 lat, lon = self._geo.arena_to_latlon(c["x"], c["y"])
-                label = str(c.get("label") or f"civilian_{i}")
                 xml = make_civilian_marker(
-                    uid=f"platopod-civ-{label}",
-                    lat=lat, lon=lon,
+                    uid=uid, lat=lat, lon=lon,
                     label=label,
                     stale_seconds=600.0,
                 )
@@ -725,19 +757,20 @@ class CotBridgeNode(Node):
                 self.get_logger().warning(
                     f"Failed to send civilian marker: {e}"
                 )
+        # Tombstone civilians that disappeared since last tick
+        self._send_tombstones(self._published_civilian_uids - new_civ_uids)
+        self._published_civilian_uids = new_civ_uids
 
         # IED hazards (CBRN drawing, u-d-c-c)
+        new_ied_uids: set[str] = set()
         for i, z in enumerate(self._ied_zones):
+            label = str(z.get("label") or f"ied_{i}")
+            uid = f"platopod-ied-{label}"
+            new_ied_uids.add(uid)
             try:
                 lat, lon = self._geo.arena_to_latlon(z["x"], z["y"])
-                label = str(z.get("label") or f"ied_{i}")
-                # Confidence is the operator's intel level — set to 0.0 here
-                # because the world state declares hazard *positions*, not
-                # the cadet's detection state. A real "discovered IED" alert
-                # comes from the ied_detector sensor reading.
                 xml = make_ied_marker(
-                    uid=f"platopod-ied-{label}",
-                    lat=lat, lon=lon,
+                    uid=uid, lat=lat, lon=lon,
                     confidence=0.0,
                     label=label,
                     stale_seconds=3600.0,
@@ -747,6 +780,8 @@ class CotBridgeNode(Node):
                 self.get_logger().warning(
                     f"Failed to send IED marker: {e}"
                 )
+        self._send_tombstones(self._published_ied_uids - new_ied_uids)
+        self._published_ied_uids = new_ied_uids
 
     def _publish_arena(self) -> None:
         """Send CoT shape events for arena boundary, zones, and obstacles."""

@@ -107,6 +107,51 @@ def make_track_detail(course: float, speed: float) -> str:
     return f'<track course="{course:.1f}" speed="{speed:.2f}"/>'
 
 
+def make_tombstone_event(uid: str) -> str:
+    """Emit a CoT event that tells ATAK/iTAK to delete a marker by UID.
+
+    Two mechanisms in one event for maximum compatibility:
+      1. `type="t-x-d-d"` (data delete) — recognised by FreeTAKServer
+         and recent ATAK builds as an explicit removal request.
+      2. `stale` time in the past — every CoT-compliant client treats
+         events past their stale time as expired and (with default
+         settings) hides them from the map.
+
+    Use this to clear stuck markers from a previous session, or as part
+    of an "active-set diff" loop: the bridge tracks which UIDs it
+    currently considers live, and sends tombstones for any that drop
+    out of the set.
+    """
+    now = _utc_now()
+    past = now - datetime.timedelta(seconds=60)
+
+    event = ET.Element("event")
+    event.set("version", "2.0")
+    event.set("uid", uid)
+    event.set("type", "t-x-d-d")
+    event.set("time", _iso_format(now))
+    event.set("start", _iso_format(past))
+    event.set("stale", _iso_format(past))
+    event.set("how", "h-e")
+
+    point = ET.SubElement(event, "point")
+    point.set("lat", "0.0")
+    point.set("lon", "0.0")
+    point.set("hae", "0.0")
+    point.set("ce", "9999999.0")
+    point.set("le", "9999999.0")
+
+    detail = ET.SubElement(event, "detail")
+    # Some ATAK builds also honour an explicit <link uid="..." relation="p-p"/>
+    # inside a delete event; include it for broader compatibility.
+    link = ET.SubElement(detail, "link")
+    link.set("uid", uid)
+    link.set("type", "t-x-d-d")
+    link.set("relation", "p-p")
+
+    return ET.tostring(event, encoding="unicode")
+
+
 def make_remarks_detail(text: str) -> str:
     """Generate <remarks>text</remarks> XML fragment (ATAK tap-to-view)."""
     safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

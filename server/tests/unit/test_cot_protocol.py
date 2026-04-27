@@ -18,6 +18,7 @@ from plato_pod.cot_protocol import (
     make_remarks_detail,
     make_sensor_detail,
     make_shape_event,
+    make_tombstone_event,
     make_track_detail,
     parse_cot_event,
     parse_nav_goal,
@@ -295,3 +296,27 @@ class TestPlumeContourEvent:
         assert stroke is not None
         # 0xFF800080 → 4286578816 → signed -8388480
         assert stroke.attrib["value"] == "-8388480"
+
+
+class TestTombstoneEvent:
+    def test_basic_shape(self) -> None:
+        xml = make_tombstone_event("platopod-civ-shopkeeper")
+        root = ET.fromstring(xml)
+        assert root.attrib["uid"] == "platopod-civ-shopkeeper"
+        # Delete-data type
+        assert root.attrib["type"] == "t-x-d-d"
+
+    def test_stale_in_the_past(self) -> None:
+        # ATAK treats events with stale < time as expired and hides them
+        xml = make_tombstone_event("anything")
+        root = ET.fromstring(xml)
+        assert root.attrib["stale"] < root.attrib["time"]
+
+    def test_link_back_to_uid(self) -> None:
+        # Some ATAK builds also honour an explicit <link> in delete events
+        xml = make_tombstone_event("platopod-arena")
+        root = ET.fromstring(xml)
+        link = root.find("detail/link")
+        assert link is not None
+        assert link.attrib["uid"] == "platopod-arena"
+        assert link.attrib["relation"] == "p-p"
