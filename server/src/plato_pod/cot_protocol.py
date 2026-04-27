@@ -368,12 +368,16 @@ def make_plume_contour_event(
     color: str | None = None,
     stale_seconds: float = 30.0,
 ) -> str:
-    """Generate a CoT freehand-polygon event for a contamination contour.
+    """Generate a CoT polygon event for a contamination contour.
 
-    Uses CoT type `u-d-f` (User Drawing Freehand) rather than `u-d-r`
-    (User Drawing Rectangle) so ATAK renders the actual polygon outline
-    instead of its axis-aligned bounding box. Default colour follows
-    NATO CBRN doctrine by magnitude:
+    Uses CoT type `u-d-r` (User Drawing Rectangle/Region). Despite the
+    "rectangle" name, ATAK and iTAK both render multi-vertex u-d-r
+    shapes as closed polygons connecting the link points in order — so
+    a 6-vertex polygon renders as a 6-sided shape, not its bounding
+    box. iTAK on iOS does NOT render `u-d-f` (drawing freehand) reliably,
+    so we standardise on u-d-r for cross-fork compatibility.
+
+    Default colour follows NATO CBRN doctrine by magnitude:
         red    (≥ 1000)  acute / IDLH zone
         orange (≥  500)  cross-contamination zone
         yellow (≥  100)  caution / detect threshold
@@ -388,7 +392,7 @@ def make_plume_contour_event(
     return _make_polygon_drawing(
         uid=uid,
         points=points,
-        cot_type="u-d-f",
+        cot_type="u-d-r",
         color=color,
         label=label,
         stale_seconds=stale_seconds,
