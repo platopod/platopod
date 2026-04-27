@@ -122,10 +122,15 @@ exercise:
     #               handle (centre) per shape — cleanest visual.
     #   "polygon" — freehand polygon outline; tracks plume shape more
     #               accurately but ATAK draws a handle per vertex.
-    plume_render: "polygon"   # iTAK on iOS doesn't render u-d-c ellipses
-                              # reliably; polygon (u-d-f) is the safer default.
-                              # Switch to "ellipse" when targeting ATAK Civ
-                              # on Android, which renders both correctly.
+    # plume_render options:
+    #   "circle"  — single u-d-c circle per threshold; one centre handle,
+    #               doctrinally aligned with NATO CBRN-1 nested-ring
+    #               reports, renders correctly on iTAK iOS.
+    #   "ellipse" — fitted ellipse (u-d-c with major/minor/angle); some
+    #               ATAK builds render this, others (incl. iTAK iOS) don't.
+    #   "polygon" — u-d-r polygon outline; iTAK draws this as the bounding
+    #               rectangle, not the actual contour curve.
+    plume_render: "circle"
     plume_thresholds: [50.0, 300.0, 1500.0]
     plume_colors:
       - "ffffff00"   # yellow — outer caution / detect ring

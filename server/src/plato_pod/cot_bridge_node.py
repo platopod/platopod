@@ -41,6 +41,7 @@ from plato_pod.cot_protocol import (
     make_cot_event,
     make_engagement_event,
     make_ied_marker,
+    make_plume_circle_event,
     make_plume_contour_event,
     make_plume_ellipse_event,
     make_sensor_detail,
@@ -694,6 +695,38 @@ class CotBridgeNode(Node):
         Polygon vertices are in arena metres; this method handles the
         geo-conversion and dispatches by self._plume_render mode.
         """
+        scale = float(getattr(self._geo, "scale_factor", 1.0))
+
+        if self._plume_render == "circle":
+            # iTAK on iOS reliably renders u-d-c (drawing circle) with the
+            # radius in the <point> ce attribute. One handle per circle.
+            # Doctrinally aligned with NATO CBRN-1 reports (concentric
+            # danger rings around the source).
+            ell = fit_ellipse(polygon)
+            if ell is None:
+                return None
+            cx, cy, major_m, minor_m, _ = ell
+            try:
+                clat, clon = self._geo.arena_to_latlon(cx, cy)
+            except Exception as e:
+                self.get_logger().warning(
+                    f"Geo conversion for plume circle failed: {e}"
+                )
+                return None
+            # Use the geometric mean of major/minor as the circle radius
+            # (so an elongated plume gets a reasonable single-radius
+            # approximation). Halve to get radius from full-axis length.
+            radius_m = math.sqrt(major_m * minor_m) * 0.5 * scale
+            return make_plume_circle_event(
+                uid=uid,
+                center_lat=clat, center_lon=clon,
+                radius_m=max(1.0, radius_m),
+                threshold_value=float(threshold),
+                label=label,
+                color=override_color,
+                stale_seconds=15.0,
+            )
+
         if self._plume_render == "ellipse":
             ell = fit_ellipse(polygon)
             if ell is None:
@@ -706,11 +739,7 @@ class CotBridgeNode(Node):
                     f"Geo conversion for plume ellipse failed: {e}"
                 )
                 return None
-            # Arena-metre axes scaled by GeoReference.scale_factor; rotate
-            # by north-vs-+x convention. The geo_reference uses +x = east,
-            # +y = north, so an angle measured CCW from +x equals the
-            # standard math angle. CoT angle is CW from north → 90 - angle.
-            scale = float(getattr(self._geo, "scale_factor", 1.0))
+            # +x = east, +y = north; CCW math angle → CW-from-north CoT angle
             angle_deg_cot = (90.0 - math.degrees(angle_rad)) % 360.0
             return make_plume_ellipse_event(
                 uid=uid,

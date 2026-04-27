@@ -311,6 +311,92 @@ def make_sensor_detail(readings: dict[str, float], model_name: str = "") -> str:
     return "\n".join(parts)
 
 
+def make_plume_circle_event(
+    uid: str,
+    center_lat: float,
+    center_lon: float,
+    radius_m: float,
+    threshold_value: float,
+    label: str = "",
+    color: str | None = None,
+    stale_seconds: float = 30.0,
+) -> str:
+    """Emit a parametric CIRCLE CoT event for a plume contour.
+
+    iTAK on iOS renders u-d-c (drawing circle) reliably with the radius
+    encoded in the `<point>` `ce` attribute (circular error). One control
+    handle per circle (the centre), no per-vertex clutter, and the
+    nested-circle representation matches NATO CBRN-1 doctrine.
+
+    Args:
+        uid, center_lat, center_lon: shape identity / location.
+        radius_m: circle radius in metres.
+        threshold_value: concentration threshold this circle represents.
+        label: optional label.
+        color: ARGB hex override; default by threshold magnitude.
+        stale_seconds: TTL on ATAK before the shape is dropped.
+    """
+    if color is None:
+        color = _plume_color_for_threshold(threshold_value)
+    if not label:
+        label = f"≥{threshold_value:.0f}"
+
+    now = _utc_now()
+    stale = now + datetime.timedelta(seconds=stale_seconds)
+    stroke_int = _argb_hex_to_signed_int(color)
+    fill_hex = "33" + color[2:] if len(color) >= 8 else "33" + color
+    fill_int = _argb_hex_to_signed_int(fill_hex)
+
+    event = ET.Element("event")
+    event.set("version", "2.0")
+    event.set("uid", uid)
+    event.set("type", "u-d-c")
+    event.set("time", _iso_format(now))
+    event.set("start", _iso_format(now))
+    event.set("stale", _iso_format(stale))
+    event.set("how", "h-e")
+
+    point = ET.SubElement(event, "point")
+    point.set("lat", f"{center_lat:.7f}")
+    point.set("lon", f"{center_lon:.7f}")
+    point.set("hae", "0.0")
+    # ATAK's u-d-c drawing convention: ce = radius in metres, le = 0.
+    point.set("ce", f"{radius_m:.2f}")
+    point.set("le", "0.0")
+
+    detail = ET.SubElement(event, "detail")
+
+    # Some ATAK builds expect <shape><ellipse/></shape>; including it
+    # alongside the ce-as-radius convention covers more receivers.
+    shape = ET.SubElement(detail, "shape")
+    ellipse = ET.SubElement(shape, "ellipse")
+    ellipse.set("major", f"{radius_m:.2f}")
+    ellipse.set("minor", f"{radius_m:.2f}")
+    ellipse.set("angle", "0")
+
+    stroke = ET.SubElement(detail, "strokeColor")
+    stroke.set("value", str(stroke_int))
+    weight = ET.SubElement(detail, "strokeWeight")
+    weight.set("value", "3.0")
+    fill = ET.SubElement(detail, "fillColor")
+    fill.set("value", str(fill_int))
+
+    link_attr = ET.SubElement(detail, "link_attr")
+    link_attr.set("line_color", str(stroke_int))
+    link_attr.set("line_thickness", "3")
+    link_attr.set("fill_color", str(fill_int))
+
+    ET.SubElement(detail, "archive")
+
+    if label:
+        contact = ET.SubElement(detail, "contact")
+        contact.set("callsign", label)
+        lbl = ET.SubElement(detail, "labels_on")
+        lbl.set("value", "true")
+
+    return ET.tostring(event, encoding="unicode")
+
+
 def make_plume_ellipse_event(
     uid: str,
     center_lat: float,
