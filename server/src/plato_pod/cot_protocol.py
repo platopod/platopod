@@ -350,7 +350,11 @@ def make_plume_circle_event(
     event = ET.Element("event")
     event.set("version", "2.0")
     event.set("uid", uid)
-    event.set("type", "u-d-c")
+    # u-d-c-c is the documented ATAK / iTAK type for CBRN drawing
+    # circles. The plain u-d-c "drawing circle" type renders
+    # inconsistently across builds; u-d-c-c is the safer choice for
+    # CBRN hazard zones specifically.
+    event.set("type", "u-d-c-c")
     event.set("time", _iso_format(now))
     event.set("start", _iso_format(now))
     event.set("stale", _iso_format(stale))
@@ -360,19 +364,24 @@ def make_plume_circle_event(
     point.set("lat", f"{center_lat:.7f}")
     point.set("lon", f"{center_lon:.7f}")
     point.set("hae", "0.0")
-    # ATAK's u-d-c drawing convention: ce = radius in metres, le = 0.
-    point.set("ce", f"{radius_m:.2f}")
+    # ATAK reference schema puts ce=0; the radius lives in <ellipse>.
+    point.set("ce", "0.0")
     point.set("le", "0.0")
 
     detail = ET.SubElement(event, "detail")
 
-    # Some ATAK builds expect <shape><ellipse/></shape>; including it
-    # alongside the ce-as-radius convention covers more receivers.
+    # ATAK reference: <shape><ellipse major minor angle/></shape>
+    # angle=360 marks a fully closed ellipse (some builds reject 0).
     shape = ET.SubElement(detail, "shape")
     ellipse = ET.SubElement(shape, "ellipse")
     ellipse.set("major", f"{radius_m:.2f}")
     ellipse.set("minor", f"{radius_m:.2f}")
-    ellipse.set("angle", "0")
+    ellipse.set("angle", "360.0")
+    # Inside-shape link element — some ATAK builds key the renderer
+    # off of this, not off the top-level strokeColor.
+    inner_link = ET.SubElement(shape, "link")
+    inner_link.set("line", "3")
+    inner_link.set("color", str(stroke_int))
 
     stroke = ET.SubElement(detail, "strokeColor")
     stroke.set("value", str(stroke_int))

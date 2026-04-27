@@ -123,14 +123,23 @@ exercise:
     #   "polygon" — freehand polygon outline; tracks plume shape more
     #               accurately but ATAK draws a handle per vertex.
     # plume_render options:
-    #   "circle"  — single u-d-c circle per threshold; one centre handle,
-    #               doctrinally aligned with NATO CBRN-1 nested-ring
-    #               reports, renders correctly on iTAK iOS.
-    #   "ellipse" — fitted ellipse (u-d-c with major/minor/angle); some
-    #               ATAK builds render this, others (incl. iTAK iOS) don't.
-    #   "polygon" — u-d-r polygon outline; iTAK draws this as the bounding
-    #               rectangle, not the actual contour curve.
-    plume_render: "circle"
+    #   "polygon" — u-d-r drawing rectangle/region. iTAK renders it as the
+    #               axis-aligned bounding box of the contour vertices.
+    #               LOSES the actual contour shape but RENDERS RELIABLY.
+    #               Default for iTAK on iOS — see notes below.
+    #   "circle"  — u-d-c-c CBRN drawing circle. Doctrinally correct
+    #               (NATO CBRN-1 reports use concentric rings) and
+    #               renders cleanly on Android ATAK Civ. iTAK on iOS
+    #               accepts the events into its database but does NOT
+    #               render any visible geometry — known limitation.
+    #   "ellipse" — fitted ellipse (u-d-c with major/minor/angle). Same
+    #               iTAK iOS limitation as "circle".
+    #
+    # If your operator audience uses Android ATAK or WinTAK, switch this
+    # to "circle" for the cleaner doctrinal look. iTAK iOS users get
+    # rectangles, but the threshold colour-coding (yellow / orange / red)
+    # still conveys the danger ranking unambiguously.
+    plume_render: "polygon"
     plume_thresholds: [50.0, 300.0, 1500.0]
     plume_colors:
       - "ffffff00"   # yellow — outer caution / detect ring
