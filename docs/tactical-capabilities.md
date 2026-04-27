@@ -131,10 +131,20 @@ remains a separate concern; this is the declarative hazard layer.
 spatial fields from the exercise YAML (gas plumes, etc.) and on a 5 s
 timer samples the configured field over the arena bounding box,
 extracts polygon contours at each threshold via marching-square cell
-unions in `plato_pod.plume_contour`, and emits them as nested CoT
-shape events using `make_plume_contour_event`. Default colour ramp
-follows NATO CBRN doctrine: red (≥1000) acute / IDLH, orange (≥500)
-cross-contamination, yellow (≥100) caution. Per-exercise overrides:
+unions in `plato_pod.plume_contour`, and emits one CoT shape per
+threshold per disconnected component. Default colour ramp follows NATO
+CBRN doctrine: red (≥1000) acute / IDLH, orange (≥500) cross-
+contamination, yellow (≥100) caution.
+
+Three rendering modes are available — choose by target ATAK client:
+
+| `plume_render` | CoT type | iTAK iOS | ATAK Android | Note |
+|---|---|---|---|---|
+| `polygon` (default) | `u-d-r` drawing region | ✅ as bbox rectangle | ✅ as polygon outline | Always renders something visible |
+| `circle` | `u-d-c-c` CBRN drawing | ⚠️ stored but not drawn | ✅ filled circle | Doctrinally correct (NATO CBRN-1 nested rings) |
+| `ellipse` | `u-d-c` with major/minor/angle | ⚠️ stored but not drawn | ✅ filled ellipse | Best fit for wind-blown plume shape |
+
+Per-exercise overrides:
 
 ```yaml
 exercise:
@@ -144,9 +154,16 @@ exercise:
           wind_speed: 2.0, wind_direction: 0.0, diffusion_coeff: 0.05 }
   cot_bridge:
     plume_field: "gas"
-    plume_thresholds: [10.0, 100.0, 500.0]
-    plume_grid_size: 60         # samples on the longer bbox axis
-    plume_simplify_m: 0.005     # Douglas-Peucker tolerance (arena m)
+    plume_render: "polygon"             # polygon | circle | ellipse
+    plume_thresholds: [50.0, 300.0, 1500.0]
+    plume_colors:                        # optional ARGB per threshold
+      - "ffffff00"                       # yellow
+      - "ffff8000"                       # orange
+      - "ffff0000"                       # red
+    plume_grid_size: 80                 # samples on the longer bbox axis
+    plume_smooth_m: 0.0                 # auto = grid_resolution × 1.0
+    plume_simplify_m: 0.0               # auto = grid_resolution × 0.5
+    plume_max_polygons: 3               # cap islands per threshold
 ```
 
 Both Python `GaussianPlumeField` (lightweight mode) and GADEN-bridged
@@ -154,6 +171,17 @@ fields (Gazebo terrain mode) feed the same pipeline, because both
 implement the `SpatialField` protocol. The cadet's gas sensor reading
 the field at the robot's position is a separate concern; this is the
 operator-side visualisation.
+
+**Lifecycle hygiene.** Plume contours are emitted with `<archive>` so
+ATAK/iTAK actually renders them — but `cot_bridge_node` tracks every
+UID it publishes per category (civilians, IEDs, plume contours) and
+sends explicit `t-x-d-d` tombstone events when:
+  * a UID drops out of the active set (scenario change, contour shrinks
+    below threshold, fragments merge),
+  * the node shuts down cleanly (Ctrl-C, ros2 launch SIGTERM).
+This means demo iterations don't accumulate stale archived markers in
+the operator's TAK app. For one-off cleanup of markers from before this
+mechanism was added, see `tools/atak_clear.py`.
 
 ## Exercise YAML — what's optional, what's new
 

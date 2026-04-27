@@ -196,3 +196,37 @@ It shows robots as real-world-sized circles on OpenStreetMap with vehicle-specif
 | Polygons (boundary, zones) not rendering | Different ATAK versions parse polygon CoT differently. Tested on ATAK-CIV; WinTAK polygon rendering varies |
 | `address already in use` on port 4242 | A previous CoT bridge is still running. Restart the Docker container or use `inbound_port:=4243` |
 | `address already in use` on port 8080 | FreeTAKServer's data package server uses 8080. Use `gateway_port:=8090` |
+
+## Known iTAK iOS rendering quirks
+
+iTAK on iOS is more restrictive than ATAK Civ on Android. Behaviours observed during demo work:
+
+- **Polygons render as bounding rectangles.** `u-d-r` (drawing region) shapes with N>4 vertices are drawn as the axis-aligned bbox of the link points, not the actual polygon outline. ATAK Android renders the outline correctly. *Workaround:* none server-side; the colour coding still conveys threshold information.
+- **`u-d-f` (freehand polygon) is silently dropped.** Events are accepted but no shape is rendered. *Workaround:* use `u-d-r` instead.
+- **`u-d-c` and `u-d-c-c` parametric circles are accepted but not rendered visibly.** They appear in iTAK's Layers/Shapes/Circles list but no geometry is drawn on the map. ATAK Android renders both correctly. *Workaround:* set `plume_render: "polygon"` in the exercise YAML's `cot_bridge:` block (default).
+- **`<archive>` is required for shapes to render at all.** Without it, drawing-shape events are accepted but never displayed. The platform sets `<archive>` and uses tombstone events to clean up disappeared UIDs.
+- **Long delays before shapes appear.** Some shape events take ~30-60 s to render after first receipt. Subsequent updates with the same UID are immediate. Cause unknown; consistent across iTAK builds tested.
+
+## Clearing stuck markers
+
+ATAK/iTAK persists `<archive>=true` events in a local SQLite database. Even after stopping the platform, archived markers can remain on the operator's map across app restarts. Three cleanup paths, in order of preference:
+
+```bash
+# 1. Tombstone all common platopod-* UIDs (works while iTAK is running)
+python3 tools/atak_clear.py --host <iTAK_IP> --port 4242 --all-platopod
+```
+
+```bash
+# 2. Specific UIDs you can identify (tap a stuck marker in iTAK to see its UID)
+python3 tools/atak_clear.py --host <iTAK_IP> --port 4242 \
+  --uids platopod-civ-shopkeeper platopod-zone-0 \
+  --type-for-uids u-d-r
+```
+
+```
+3. Brute force: in iTAK → Layers → Shapes, select each stuck shape and delete.
+   Or, on iOS: long-press iTAK icon → Remove App → Delete App → reinstall
+   (NOT "Offload App" — Offload preserves the database).
+```
+
+Going forward, `cot_bridge_node` tombstones its UIDs on clean shutdown and on scenario change, so iTAK accumulation doesn't recur during normal operation.

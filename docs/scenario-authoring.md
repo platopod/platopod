@@ -227,7 +227,15 @@ This whitelists which sensor plugins the sensor engine will instantiate. Per-rob
    print('point_sources:', {k: len(v) for k, v in env.point_sources.items()})
    "
    ```
-4. **Full launch** — run the platform with your scenario. `world_state_node` should start first so its latched topics are available when consumers connect:
+4. **Full launch** — easiest path is the helper script (mounted into the container as `/ros2_ws/tools/run_demo.sh`):
+   ```bash
+   /ros2_ws/tools/run_demo.sh /ros2_ws/config/exercises/my-scenario.yaml 192.168.1.233
+   ```
+   Spins up the full stack: arena_model, registry, world_state, virtual_sim, los_python, engagement, cot_bridge. Override geo origin / scale / ports via env vars (`GEO_LAT`, `SCALE`, `COT_PORT`, etc.).
+
+   Stop with: `/ros2_ws/tools/stop_demo.sh`.
+
+   For finer control, launch nodes individually. `world_state_node` should start first so its latched topics are available when consumers connect:
    ```bash
    EX=config/exercises/my-scenario.yaml
 
