@@ -206,8 +206,14 @@ class CotBridgeNode(Node):
     # --- Callbacks ---
 
     def _robot_status_callback(self, msg: RobotStatusListMsg) -> None:
-        """Cache latest robot statuses and subscribe to new sensor topics."""
-        current_ids = set()
+        """Cache latest robot statuses and subscribe to new sensor topics.
+
+        We keep wounded/destroyed/incapacitated robots in the cache so the
+        casualty marker can derive the correct callsign (RED-8, not BOT-8)
+        and so the operator dashboard can show the body's last position.
+        Filtering by status happens at publish time instead.
+        """
+        current_active_ids: set[int] = set()
         with self._robot_lock:
             self._robots = [
                 {
@@ -218,18 +224,20 @@ class CotBridgeNode(Node):
                     "status": r.status,
                     "team": r.team,
                     "vehicle_role": r.vehicle_role,
-                    "health": r.health if r.health > 0.0 else 1.0,
+                    "health": r.health,
                 }
                 for r in msg.robots
-                if r.status == "active"
+                if r.status != "inactive"
             ]
-            current_ids = {r["robot_id"] for r in self._robots}
+            current_active_ids = {
+                r["robot_id"] for r in self._robots if r["status"] == "active"
+            }
 
-        # Subscribe to sensor topics for new robots
+        # Subscribe to sensor topics for new active robots only
         if self._publish_sensor_data:
-            for rid in current_ids - self._subscribed_robots:
+            for rid in current_active_ids - self._subscribed_robots:
                 self._subscribe_robot_sensors(rid)
-            self._subscribed_robots = current_ids
+            self._subscribed_robots = current_active_ids
 
     def _subscribe_robot_sensors(self, robot_id: int) -> None:
         """Subscribe to typed SensorReading topics for a robot."""
@@ -324,10 +332,16 @@ class CotBridgeNode(Node):
         if msg.hit and msg.damage > 0:
             new_health = max(0.0, float(tgt.get("health", 1.0)) - float(msg.damage))
             status = "destroyed" if new_health <= 0.0 else "wounded"
+            # Resolve the live callsign so casualty shows e.g. RED-8, not BOT-8
+            _ctype, casualty_callsign = self._resolve_identity(
+                int(target),
+                tgt.get("team") or "",
+                tgt.get("vehicle_role") or "",
+            )
             try:
                 xml = make_casualty_event(
                     robot_uid=f"platopod-{target}-cas",
-                    callsign=str(tgt.get("callsign", f"BOT-{target}")),
+                    callsign=casualty_callsign,
                     lat=lat, lon=lon,
                     status=status,
                     health=new_health,
@@ -338,10 +352,43 @@ class CotBridgeNode(Node):
 
     # --- Outbound publishing ---
 
+    def _resolve_identity(
+        self, robot_id: int, live_team: str, live_role: str,
+    ) -> tuple[str, str]:
+        """Return (cot_type, callsign) for a robot, preferring live fields.
+
+        Used both by the live-unit publisher and by the casualty marker so
+        a destroyed RED-8 still gets the 'RED-8' callsign and an a-h-G-X
+        type instead of a generic BOT-8 / a-f-G fallback.
+        """
+        role = (
+            live_role
+            or self._vehicle_roles.get(robot_id)
+            or self._default_role
+        )
+        base_cot_type = VEHICLE_ROLE_TO_COT_TYPE.get(role, "a-f-G")
+        if live_team == "red" and base_cot_type.startswith("a-f"):
+            cot_type = "a-h" + base_cot_type[3:]
+        elif live_team in ("blue", "green") and base_cot_type.startswith("a-h"):
+            cot_type = "a-f" + base_cot_type[3:]
+        else:
+            cot_type = base_cot_type
+
+        callsign = (
+            self._callsigns.get(robot_id)
+            or (f"{live_team.upper()}-{robot_id}" if live_team else f"POD-{robot_id}")
+        )
+        return cot_type, callsign
+
     def _publish_robots(self) -> None:
-        """Send CoT events for all active robots with sensor data."""
+        """Send CoT events for active robots with sensor data.
+
+        Non-active robots are kept in the cache so the casualty marker
+        can resolve their callsign / affiliation, but we don't redraw a
+        live symbol for them — only the casualty marker remains.
+        """
         with self._robot_lock:
-            robots = list(self._robots)
+            robots = [r for r in self._robots if r["status"] == "active"]
 
         for r in robots:
             robot_id = r["robot_id"]
@@ -350,31 +397,8 @@ class CotBridgeNode(Node):
             # Heading: arena theta (radians, 0=+x) → CoT course (degrees CW from north)
             course = math.degrees(-r["theta"]) % 360.0
 
-            # Prefer live RobotStatus fields over the YAML overrides — the
-            # registry is authoritative now that team/vehicle_role are
-            # propagated via the typed contract. Fall back to YAML overrides
-            # for legacy configs that don't set them per-spawn.
-            live_role = r.get("vehicle_role") or ""
-            live_team = r.get("team") or ""
-            role = (
-                live_role
-                or self._vehicle_roles.get(robot_id)
-                or self._default_role
-            )
-
-            # Map team to CoT affiliation prefix when role doesn't already
-            # encode hostility. team=red → 'a-h-…', team=blue/green → 'a-f-…'.
-            base_cot_type = VEHICLE_ROLE_TO_COT_TYPE.get(role, "a-f-G")
-            if live_team == "red" and base_cot_type.startswith("a-f"):
-                cot_type = "a-h" + base_cot_type[3:]
-            elif live_team in ("blue", "green") and base_cot_type.startswith("a-h"):
-                cot_type = "a-f" + base_cot_type[3:]
-            else:
-                cot_type = base_cot_type
-
-            callsign = (
-                self._callsigns.get(robot_id)
-                or (f"{live_team.upper()}-{robot_id}" if live_team else f"POD-{robot_id}")
+            cot_type, callsign = self._resolve_identity(
+                robot_id, r.get("team") or "", r.get("vehicle_role") or "",
             )
             uid = f"platopod-{robot_id}"
 
