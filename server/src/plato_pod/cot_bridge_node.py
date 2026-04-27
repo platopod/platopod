@@ -944,6 +944,23 @@ class CotBridgeNode(Node):
                 )
 
     def destroy_node(self) -> None:
+        # On clean shutdown, tombstone everything we published so iTAK
+        # doesn't accumulate stale archived markers across sessions.
+        try:
+            stale_uids = (
+                self._published_civilian_uids
+                | self._published_ied_uids
+                | self._published_plume_uids
+            )
+            if stale_uids:
+                self.get_logger().info(
+                    f"Tombstoning {len(stale_uids)} UIDs on shutdown"
+                )
+                self._send_tombstones(stale_uids)
+        except Exception as e:
+            # Don't let tombstone errors block clean shutdown.
+            self.get_logger().warning(f"Shutdown tombstone failed: {e}")
+
         self._inbound_running = False
         self._inbound_sock.close()
         self._transport.close()
