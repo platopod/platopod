@@ -44,6 +44,12 @@ exercise:
       damage: 1.0
       ammo_capacity: 10
 
+  # ROE: deliberately tight to force cadets to think before engaging.
+  # civilian_proximity_m: 8 arena-metres covers most of the building cluster
+  # so virtually any shot inside the inhabited area triggers a ROE flag.
+  # This is a feature, not a bug: cadets must reposition to engage cleanly.
+  # The civilian_proximity rule has severity "violation" (warning + logged),
+  # not "critical", so it does not block fire — only friendly_fire does.
   roe:
     fire_permission: "weapons_tight"
     civilian_proximity_m: 8
@@ -102,6 +108,13 @@ exercise:
         cover_value: 1.0
         label: "building_bravo"
 
+    # Civilian placement is INTENTIONAL ROE-training pressure, not arbitrary.
+    # Three civilians inside the building cluster mean any direct-fire
+    # engagement near the buildings flags `civilian_proximity` violations.
+    # Cadets must observe, plan, and reposition to a clean firing line.
+    # Move blue + red to y < 0.05 (the open lower-left corridor) for a
+    # demo without civilian flags — useful for dry runs of the engagement
+    # pipeline before introducing the ROE pressure.
     civilian_population:
       - position: [0.42, 0.40]
         label: "shopkeeper"

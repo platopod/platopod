@@ -121,6 +121,49 @@ class TestHealthEffects:
         assert out_wounded.effective_pok < out_full.effective_pok
 
 
+class TestNonOperationalTarget:
+    """A non-operational target (destroyed, incapacitated, frozen) should
+    short-circuit. The shot still counts as fired (ammunition expended)
+    but produces no damage and no civilian/ROE flagging."""
+
+    def test_destroyed_target_short_circuits(self) -> None:
+        actor = _robot(1, 0, 0)
+        target = Robot(robot_id=2, deployment="virtual", x=100, y=0,
+                        health=0.0, status="destroyed")
+        outcome = evaluate_fire(actor, target, _m4(), rng=Random(42))
+        assert outcome.fired is True
+        assert outcome.hit is False
+        assert outcome.damage == 0.0
+        assert outcome.rationale == "target_already_destroyed"
+        assert outcome.civilian_violation is False
+
+    def test_incapacitated_target_short_circuits(self) -> None:
+        actor = _robot(1, 0, 0)
+        target = Robot(robot_id=2, deployment="virtual", x=100, y=0,
+                        health=0.2, status="incapacitated")
+        outcome = evaluate_fire(actor, target, _m4(), rng=Random(42))
+        assert outcome.fired is True
+        assert outcome.hit is False
+        assert outcome.rationale == "target_already_incapacitated"
+
+    def test_frozen_target_short_circuits(self) -> None:
+        actor = _robot(1, 0, 0)
+        target = Robot(robot_id=2, deployment="virtual", x=100, y=0,
+                        status="frozen")
+        outcome = evaluate_fire(actor, target, _m4(), rng=Random(42))
+        assert outcome.fired is True
+        assert outcome.hit is False
+        assert outcome.rationale == "target_already_frozen"
+
+    def test_active_target_not_short_circuited(self) -> None:
+        # Sanity check: an active wounded target should still resolve normally
+        actor = _robot(1, 0, 0)
+        target = _robot(2, 50, 0, health=0.6)  # status defaults to active
+        outcome = evaluate_fire(actor, target, _m4(), rng=Random(0))
+        # Whatever the outcome, rationale must NOT be the short-circuit
+        assert not outcome.rationale.startswith("target_already_")
+
+
 class TestROECivilian:
     def test_no_civilians_no_violation(self) -> None:
         actor = _robot(1, 0, 0)

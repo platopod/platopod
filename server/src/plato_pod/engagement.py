@@ -132,6 +132,18 @@ def evaluate_fire(
     civilians = civilians or []
     other_units = other_units or []
 
+    # Short-circuit when the target is already non-operational (destroyed,
+    # incapacitated, frozen). Don't waste evaluation; don't re-emit hits on
+    # a corpse. The shot is still recorded (fired=True) so the operator
+    # sees ammunition expended.
+    if not target.is_operational():
+        return EngagementOutcome(
+            fired=True, hit=False, blocked=True, damage=0.0,
+            distance_m=0.0, effective_pok=0.0,
+            rationale=f"target_already_{target.status}",
+            civilian_violation=False, civilians_at_risk=[],
+        )
+
     # Compute distance
     if actor is not None:
         distance = math.hypot(target.x - actor.x, target.y - actor.y)
