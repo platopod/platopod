@@ -1,0 +1,9 @@
+# Apply damage to a robot (engagement outcome, gas exposure, etc.)
+int32 robot_id
+float64 damage              # 0..1; subtracted from current health
+string reason               # "engagement", "cbrn", "ied", etc.
+---
+bool success
+float64 new_health
+string new_status
+string message

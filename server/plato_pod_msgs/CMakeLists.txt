@@ -21,12 +21,37 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RobotStatusList.msg"
   # CoT integration
   "msg/NavGoal.msg"
+  # Tactical engagement (typed contracts replacing String + JSON)
+  "msg/FireIntent.msg"
+  "msg/EngagementOutcome.msg"
+  "msg/Observation.msg"
+  # Sensor envelope
+  "msg/SensorReading.msg"
+  # World state (published by world_state_node, latched)
+  "msg/CoverPolygon.msg"
+  "msg/WorldCover.msg"
+  "msg/Civilian.msg"
+  "msg/CivilianList.msg"
+  "msg/IedZone.msg"
+  "msg/IedZoneList.msg"
+  "msg/EwEmitter.msg"
+  "msg/EwEmitterList.msg"
+  "msg/JammingZone.msg"
+  "msg/JammingZoneList.msg"
+  "msg/DeadZone.msg"
+  "msg/DeadZoneList.msg"
+  "msg/WeatherState.msg"
+  "msg/RoeRules.msg"
+  "msg/WeaponSpec.msg"
+  "msg/WeaponCatalog.msg"
   # Services
   "srv/RegisterPhysical.srv"
   "srv/SpawnVirtual.srv"
   "srv/RemoveRobot.srv"
   "srv/ResetRobot.srv"
   "srv/ListRobots.srv"
+  "srv/ApplyDamage.srv"
+  "srv/EvaluateLos.srv"
 )
 
 ament_package()

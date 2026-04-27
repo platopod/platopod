@@ -1,0 +1,24 @@
+# Evaluate line-of-sight between two 3D points.
+#
+# Implementations:
+#   * los_python_node      — 2D Python ray cast against cover polygons +
+#                             height samples on the elevation grid.
+#   * los_gazebo_node      — Gazebo lidar/raycast query through the live
+#                             world (preferred when terrain mode is up).
+#
+# Both nodes serve the same `~/evaluate_los` service. Consumers are agnostic.
+# Pick a backend by launching the corresponding node.
+
+float64 from_x              # arena metres
+float64 from_y
+float64 from_z
+float64 to_x
+float64 to_y
+float64 to_z
+---
+bool visible
+float64 attenuation         # 0..1; 1 = clear, 0 = fully occluded
+string rationale            # short tag (e.g. "clear", "blocked_by_cover:wall",
+                            # "blocked_by_terrain", "out_of_visual_range")
+float64 obstruction_distance_m   # distance along ray to first obstruction;
+                                  # negative if no obstruction found
