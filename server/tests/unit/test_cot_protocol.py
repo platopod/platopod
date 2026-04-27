@@ -18,6 +18,7 @@ from plato_pod.cot_protocol import (
     make_remarks_detail,
     make_sensor_detail,
     make_shape_event,
+    make_stale_update_event,
     make_tombstone_event,
     make_track_detail,
     parse_cot_event,
@@ -320,3 +321,28 @@ class TestTombstoneEvent:
         assert link is not None
         assert link.attrib["uid"] == "platopod-arena"
         assert link.attrib["relation"] == "p-p"
+
+    def test_remove_element_present(self) -> None:
+        xml = make_tombstone_event("platopod-civ-shopkeeper")
+        root = ET.fromstring(xml)
+        remove = root.find("detail/_remove")
+        assert remove is not None
+        assert remove.attrib["uid"] == "platopod-civ-shopkeeper"
+
+    def test_how_is_operator_delete(self) -> None:
+        xml = make_tombstone_event("x")
+        root = ET.fromstring(xml)
+        assert root.attrib["how"] == "h-g-i-g-o"
+
+
+class TestStaleUpdateEvent:
+    def test_keeps_original_type(self) -> None:
+        xml = make_stale_update_event("platopod-civ-shopkeeper", "a-n-G")
+        root = ET.fromstring(xml)
+        assert root.attrib["uid"] == "platopod-civ-shopkeeper"
+        assert root.attrib["type"] == "a-n-G"
+
+    def test_stale_in_the_past(self) -> None:
+        xml = make_stale_update_event("anything", "a-f-G")
+        root = ET.fromstring(xml)
+        assert root.attrib["stale"] < root.attrib["time"]

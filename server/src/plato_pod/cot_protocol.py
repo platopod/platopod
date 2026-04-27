@@ -108,19 +108,28 @@ def make_track_detail(course: float, speed: float) -> str:
 
 
 def make_tombstone_event(uid: str) -> str:
-    """Emit a CoT event that tells ATAK/iTAK to delete a marker by UID.
+    """Emit a CoT delete event for one UID — iTAK / ATAK will drop the marker.
 
-    Two mechanisms in one event for maximum compatibility:
-      1. `type="t-x-d-d"` (data delete) — recognised by FreeTAKServer
-         and recent ATAK builds as an explicit removal request.
-      2. `stale` time in the past — every CoT-compliant client treats
-         events past their stale time as expired and (with default
-         settings) hides them from the map.
+    iTAK and ATAK don't all recognise the same delete signal, so this
+    event packs four known mechanisms together:
 
-    Use this to clear stuck markers from a previous session, or as part
-    of an "active-set diff" loop: the bridge tracks which UIDs it
-    currently considers live, and sends tombstones for any that drop
-    out of the set.
+      1. `type="t-x-d-d"` (data delete) at the event level — ATAK Civ
+         3.x+ and FreeTAKServer recognise this.
+      2. `<_remove uid="..."/>` element inside `<detail>` — older ATAK
+         builds and ATAK Forge fork.
+      3. `<link uid=... relation="p-p" type="t-x-d-d"/>` — additional
+         signal honoured by some forks for orphan-link removal.
+      4. `stale < time` — generic CoT staleness, makes sure standards-
+         compliant receivers expire the event regardless of mechanism.
+
+    The `how` attribute is `h-g-i-g-o` (human-generated-internal-
+    generated-operator), the canonical "how" for operator deletes.
+
+    For events archived in ATAK's local database, sending this MAY not
+    be enough — archived markers can only be reliably cleared by
+    deleting the iTAK / ATAK local data (Delete App + reinstall on
+    iOS, or Clear App Data on Android). The tombstone reliably
+    suppresses live updates and removes non-archived markers.
     """
     now = _utc_now()
     past = now - datetime.timedelta(seconds=60)
@@ -132,7 +141,7 @@ def make_tombstone_event(uid: str) -> str:
     event.set("time", _iso_format(now))
     event.set("start", _iso_format(past))
     event.set("stale", _iso_format(past))
-    event.set("how", "h-e")
+    event.set("how", "h-g-i-g-o")
 
     point = ET.SubElement(event, "point")
     point.set("lat", "0.0")
@@ -142,13 +151,49 @@ def make_tombstone_event(uid: str) -> str:
     point.set("le", "9999999.0")
 
     detail = ET.SubElement(event, "detail")
-    # Some ATAK builds also honour an explicit <link uid="..." relation="p-p"/>
-    # inside a delete event; include it for broader compatibility.
+    # ATAK Civ-style remove element
+    remove = ET.SubElement(detail, "_remove")
+    remove.set("uid", uid)
+    # Older ATAK link-relation delete signal
     link = ET.SubElement(detail, "link")
     link.set("uid", uid)
     link.set("type", "t-x-d-d")
     link.set("relation", "p-p")
 
+    return ET.tostring(event, encoding="unicode")
+
+
+def make_stale_update_event(uid: str, original_type: str) -> str:
+    """Emit a same-UID, same-type event with stale far in the past.
+
+    This is the second half of the iTAK cleanup pattern: even when iTAK
+    ignores `t-x-d-d` events, it processes UPDATES to existing markers.
+    By sending an update with the original type but stale-in-past, iTAK
+    expires the marker on its next refresh cycle.
+
+    Use in combination with `make_tombstone_event`: send both per UID,
+    one of them will work depending on the iTAK build.
+    """
+    now = _utc_now()
+    past = now - datetime.timedelta(seconds=600)
+
+    event = ET.Element("event")
+    event.set("version", "2.0")
+    event.set("uid", uid)
+    event.set("type", original_type)
+    event.set("time", _iso_format(now))
+    event.set("start", _iso_format(past))
+    event.set("stale", _iso_format(past))
+    event.set("how", "h-g-i-g-o")
+
+    point = ET.SubElement(event, "point")
+    point.set("lat", "0.0")
+    point.set("lon", "0.0")
+    point.set("hae", "0.0")
+    point.set("ce", "9999999.0")
+    point.set("le", "9999999.0")
+
+    ET.SubElement(event, "detail")
     return ET.tostring(event, encoding="unicode")
 
 
