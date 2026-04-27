@@ -117,6 +117,16 @@ status, its live symbol stops being redrawn but its record stays in the
 bridge's cache so the casualty marker can resolve the correct callsign
 and remain visible at the body's last known position.
 
+**Civilians and IED hazards.** `cot_bridge_node` subscribes to
+`/world/civilians` and `/world/ied_zones` (latched) and emits an
+`a-n-G` marker per civilian (`platopod-civ-<label>`) and a `u-d-c-c`
+CBRN-drawing marker per IED hazard (`platopod-ied-<label>`). Stable
+UIDs mean ATAK/iTAK update the existing markers rather than spawning
+duplicates. Markers republish on the same cadence as the arena
+boundary, plus an immediate flush whenever the corresponding world
+topic delivers a new sample. The cadet's ied_detector *sensor reading*
+remains a separate concern; this is the declarative hazard layer.
+
 ## Exercise YAML — what's optional, what's new
 
 Existing exercises keep working unchanged. New optional sections all live in the `exercise:` block:
