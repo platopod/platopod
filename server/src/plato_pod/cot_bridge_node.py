@@ -15,10 +15,18 @@ import threading
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile
+
+_LATCHED_QOS = QoSProfile(
+    depth=1, history=HistoryPolicy.KEEP_LAST,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+)
 
 from plato_pod_msgs.msg import (
     ArenaModel as ArenaModelMsg,
+    CivilianList as CivilianListMsg,
     EngagementOutcome as EngagementOutcomeMsg,
+    IedZoneList as IedZoneListMsg,
     NavGoal,
     RobotStatusList as RobotStatusListMsg,
     SensorReading as SensorReadingMsg,
@@ -27,9 +35,11 @@ from plato_pod_msgs.msg import (
 from plato_pod.cot_protocol import (
     VEHICLE_ROLE_TO_COT_TYPE,
     make_casualty_event,
+    make_civilian_marker,
     make_contact_detail,
     make_cot_event,
     make_engagement_event,
+    make_ied_marker,
     make_sensor_detail,
     make_shape_event,
     make_track_detail,
@@ -111,6 +121,9 @@ class CotBridgeNode(Node):
         self._arena_boundary: list[tuple[float, float]] = []
         self._arena_zones: list[dict] = []
         self._arena_obstacles: list[dict] = []
+        # World-state caches (filled from latched /world/* topics)
+        self._civilians: list[dict] = []     # {x, y, label}
+        self._ied_zones: list[dict] = []     # {x, y, detect_radius, label}
         self._robot_lock = threading.Lock()
         self._sensor_lock = threading.Lock()
         self._robot_sensors: dict[int, dict[str, dict]] = {}
@@ -141,6 +154,16 @@ class CotBridgeNode(Node):
             self._engagement_event_callback, 10,
         )
 
+        # World-state subscriptions (latched, from world_state_node)
+        self.create_subscription(
+            CivilianListMsg, "/world/civilians",
+            self._civilians_callback, _LATCHED_QOS,
+        )
+        self.create_subscription(
+            IedZoneListMsg, "/world/ied_zones",
+            self._ied_zones_callback, _LATCHED_QOS,
+        )
+
         # Publisher for inbound nav goals
         self._pub_nav_goal = self.create_publisher(NavGoal, "/cot/nav_goal", 10)
 
@@ -148,6 +171,11 @@ class CotBridgeNode(Node):
         publish_period = 1.0 / publish_rate
         self._pose_timer = self.create_timer(publish_period, self._publish_robots)
         self._arena_timer = self.create_timer(arena_republish, self._publish_arena)
+        # Civilians + IEDs republish on the same cadence as the arena
+        # so iTAK keeps the markers fresh and they don't go stale.
+        self._world_timer = self.create_timer(
+            arena_republish, self._publish_world_entities,
+        )
 
         # Inbound listener (UDP)
         self._inbound_running = True
@@ -290,6 +318,34 @@ class CotBridgeNode(Node):
             }
             for obs in msg.obstacles
         ]
+
+    def _civilians_callback(self, msg: CivilianListMsg) -> None:
+        """Cache civilian positions from world_state_node (latched topic)."""
+        self._civilians = [
+            {"x": float(c.x), "y": float(c.y), "label": c.label or "civilian"}
+            for c in msg.civilians
+        ]
+        self.get_logger().info(
+            f"Civilians updated: {len(self._civilians)} entities"
+        )
+        # Publish immediately so iTAK shows them right away rather than
+        # waiting for the next world timer tick.
+        self._publish_world_entities()
+
+    def _ied_zones_callback(self, msg: IedZoneListMsg) -> None:
+        """Cache IED hazards from world_state_node (latched topic)."""
+        self._ied_zones = [
+            {
+                "x": float(z.x), "y": float(z.y),
+                "detect_radius_m": float(z.detectability_radius_m),
+                "label": z.label or "ied",
+            }
+            for z in msg.zones
+        ]
+        self.get_logger().info(
+            f"IED zones updated: {len(self._ied_zones)} entities"
+        )
+        self._publish_world_entities()
 
     def _engagement_event_callback(self, msg: EngagementOutcomeMsg) -> None:
         """Translate a typed EngagementOutcome into CoT alert + casualty marker."""
@@ -446,6 +502,53 @@ class CotBridgeNode(Node):
             )
 
             self._transport.send(xml)
+
+    def _publish_world_entities(self) -> None:
+        """Periodically emit CoT markers for civilians and IED hazards.
+
+        Each entity gets a stable UID derived from its label so iTAK
+        updates the existing marker rather than spawning duplicates.
+        Stale time is set well above the republish period so markers
+        don't blink on slow networks.
+        """
+        # Civilians (neutral, a-n-G)
+        for i, c in enumerate(self._civilians):
+            try:
+                lat, lon = self._geo.arena_to_latlon(c["x"], c["y"])
+                label = str(c.get("label") or f"civilian_{i}")
+                xml = make_civilian_marker(
+                    uid=f"platopod-civ-{label}",
+                    lat=lat, lon=lon,
+                    label=label,
+                    stale_seconds=600.0,
+                )
+                self._transport.send(xml)
+            except Exception as e:
+                self.get_logger().warning(
+                    f"Failed to send civilian marker: {e}"
+                )
+
+        # IED hazards (CBRN drawing, u-d-c-c)
+        for i, z in enumerate(self._ied_zones):
+            try:
+                lat, lon = self._geo.arena_to_latlon(z["x"], z["y"])
+                label = str(z.get("label") or f"ied_{i}")
+                # Confidence is the operator's intel level — set to 0.0 here
+                # because the world state declares hazard *positions*, not
+                # the cadet's detection state. A real "discovered IED" alert
+                # comes from the ied_detector sensor reading.
+                xml = make_ied_marker(
+                    uid=f"platopod-ied-{label}",
+                    lat=lat, lon=lon,
+                    confidence=0.0,
+                    label=label,
+                    stale_seconds=3600.0,
+                )
+                self._transport.send(xml)
+            except Exception as e:
+                self.get_logger().warning(
+                    f"Failed to send IED marker: {e}"
+                )
 
     def _publish_arena(self) -> None:
         """Send CoT shape events for arena boundary, zones, and obstacles."""
