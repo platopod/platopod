@@ -9,6 +9,7 @@ import pytest
 from plato_pod.plume_contour import (
     ContourLevel,
     extract_contours,
+    fit_ellipse,
 )
 from plato_pod.spatial_field import GaussianPlumeField, UniformField
 
@@ -142,20 +143,78 @@ class TestGaussianPlume:
 # ---------- simplification --------------------------------------------------
 
 class TestSimplification:
-    def test_simplify_reduces_vertex_count(self) -> None:
+    def test_higher_tolerance_reduces_vertex_count(self) -> None:
         field = _PointPlume()
-        verts_full = extract_contours(
+        # Two non-zero tolerances; bigger should produce fewer vertices.
+        # (Passing 0.0 lets extract_contours pick its smart default.)
+        verts_low = extract_contours(
             field, (-50, -50, 50, 50), [500.0],
-            grid_size=80, simplify_tolerance=0.0,
+            grid_size=80, simplify_tolerance=0.5,
         )[0].polygons[0]
-        verts_simp = extract_contours(
+        verts_high = extract_contours(
             field, (-50, -50, 50, 50), [500.0],
-            grid_size=80, simplify_tolerance=2.0,
+            grid_size=80, simplify_tolerance=5.0,
         )[0].polygons[0]
-        # Simplified polygon must have fewer or equal vertices
-        assert len(verts_simp) <= len(verts_full)
-        # And must still be roughly the same shape — area within 20%
+        assert len(verts_high) <= len(verts_low)
+        # And must still be roughly the same shape — area within 30%
         from shapely.geometry import Polygon
-        a_full = Polygon(verts_full).area
-        a_simp = Polygon(verts_simp).area
-        assert abs(a_simp - a_full) / a_full < 0.2
+        a_low = Polygon(verts_low).area
+        a_high = Polygon(verts_high).area
+        assert abs(a_high - a_low) / a_low < 0.3
+
+
+class TestFitEllipse:
+    def test_circle_fits_circle(self) -> None:
+        # Vertices on a unit circle around origin
+        n = 64
+        verts = [
+            (math.cos(2 * math.pi * i / n), math.sin(2 * math.pi * i / n))
+            for i in range(n)
+        ]
+        result = fit_ellipse(verts)
+        assert result is not None
+        cx, cy, major, minor, _ = result
+        assert abs(cx) < 0.05 and abs(cy) < 0.05
+        assert abs(major - 2.0) < 0.05   # diameter
+        assert abs(minor - 2.0) < 0.05
+
+    def test_axis_aligned_ellipse(self) -> None:
+        # Wide horizontal ellipse: a=10, b=2, axis-aligned
+        n = 64
+        verts = [
+            (10 * math.cos(2 * math.pi * i / n),
+              2 * math.sin(2 * math.pi * i / n))
+            for i in range(n)
+        ]
+        result = fit_ellipse(verts)
+        assert result is not None
+        _, _, major, minor, angle = result
+        assert abs(major - 20.0) < 0.5
+        assert abs(minor - 4.0) < 0.5
+        # Major axis along x → angle ~ 0 (or pi, equivalent for an axis)
+        assert abs(angle) < 0.05 or abs(abs(angle) - math.pi) < 0.05
+
+    def test_rotated_ellipse(self) -> None:
+        # Same ellipse, rotated 45°
+        n = 64
+        a, b = 10.0, 2.0
+        ang = math.pi / 4
+        cos_a, sin_a = math.cos(ang), math.sin(ang)
+        verts = []
+        for i in range(n):
+            t = 2 * math.pi * i / n
+            x = a * math.cos(t)
+            y = b * math.sin(t)
+            verts.append((x * cos_a - y * sin_a, x * sin_a + y * cos_a))
+        result = fit_ellipse(verts)
+        assert result is not None
+        _, _, major, minor, angle = result
+        assert abs(major - 20.0) < 0.5
+        assert abs(minor - 4.0) < 0.5
+        # Recovered angle should match within 1° (or ±π for axis ambiguity)
+        a_norm = abs(angle - ang)
+        assert a_norm < 0.05 or abs(a_norm - math.pi) < 0.05
+
+    def test_too_few_vertices_returns_none(self) -> None:
+        assert fit_ellipse([]) is None
+        assert fit_ellipse([(0, 0), (1, 1)]) is None

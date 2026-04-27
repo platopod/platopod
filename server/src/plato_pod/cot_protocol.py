@@ -221,6 +221,55 @@ def make_sensor_detail(readings: dict[str, float], model_name: str = "") -> str:
     return "\n".join(parts)
 
 
+def make_plume_ellipse_event(
+    uid: str,
+    center_lat: float,
+    center_lon: float,
+    major_axis_m: float,
+    minor_axis_m: float,
+    angle_deg: float,
+    threshold_value: float,
+    label: str = "",
+    color: str | None = None,
+    stale_seconds: float = 30.0,
+) -> str:
+    """Emit a parametric ellipse CoT event for a plume contour.
+
+    ATAK renders ellipses with only ONE control-point handle (the
+    centre), regardless of how detailed the ellipse is. That makes
+    ellipses dramatically cleaner than polygons for a CBRN plume picture
+    where multiple nested contours would otherwise produce dozens of
+    vertex handles cluttering the operator's screen.
+
+    Args:
+        uid: Unique identifier (stable across redraws).
+        center_lat / center_lon: ellipse centre in WGS84.
+        major_axis_m / minor_axis_m: full axis lengths in metres.
+        angle_deg: rotation of the major axis, degrees clockwise from
+            north (standard CoT convention).
+        threshold_value: concentration threshold this contour represents
+            (used for default colour selection).
+        label: optional label.
+        color: ARGB hex override; default by threshold magnitude.
+        stale_seconds: TTL on ATAK before the shape is dropped.
+    """
+    if color is None:
+        color = _plume_color_for_threshold(threshold_value)
+    if not label:
+        label = f"≥{threshold_value:.0f}"
+    return _make_ellipse_drawing(
+        uid=uid,
+        center_lat=center_lat,
+        center_lon=center_lon,
+        major_axis_m=major_axis_m,
+        minor_axis_m=minor_axis_m,
+        angle_deg=angle_deg,
+        color=color,
+        label=label,
+        stale_seconds=stale_seconds,
+    )
+
+
 def make_plume_contour_event(
     uid: str,
     points: list[tuple[float, float]],
@@ -359,6 +408,85 @@ def make_shape_event(
     link_attr.set("fill_color", str(fill_int))
 
     # Persistent across stale (so it stays visible)
+    ET.SubElement(detail, "archive")
+
+    if label:
+        contact = ET.SubElement(detail, "contact")
+        contact.set("callsign", label)
+        lbl = ET.SubElement(detail, "labels_on")
+        lbl.set("value", "true")
+
+    return ET.tostring(event, encoding="unicode")
+
+
+def _make_ellipse_drawing(
+    uid: str,
+    center_lat: float,
+    center_lon: float,
+    major_axis_m: float,
+    minor_axis_m: float,
+    angle_deg: float,
+    color: str,
+    label: str = "",
+    stale_seconds: float = 30.0,
+) -> str:
+    """Generate a parametric ellipse CoT drawing event.
+
+    Uses ATAK's CoT type `u-d-c` (drawing circle/ellipse). The shape is
+    described by axes in metres and a rotation angle, so ATAK renders it
+    smoothly without per-vertex control handles.
+    """
+    now = _utc_now()
+    stale = now + datetime.timedelta(seconds=stale_seconds)
+
+    stroke_int = _argb_hex_to_signed_int(color)
+    fill_hex = "33" + color[2:] if len(color) >= 8 else "33" + color
+    fill_int = _argb_hex_to_signed_int(fill_hex)
+
+    event = ET.Element("event")
+    event.set("version", "2.0")
+    event.set("uid", uid)
+    event.set("type", "u-d-c")
+    event.set("time", _iso_format(now))
+    event.set("start", _iso_format(now))
+    event.set("stale", _iso_format(stale))
+    event.set("how", "h-e")
+
+    point = ET.SubElement(event, "point")
+    point.set("lat", f"{center_lat:.7f}")
+    point.set("lon", f"{center_lon:.7f}")
+    point.set("hae", "0.0")
+    point.set("ce", "9999999.0")
+    point.set("le", "9999999.0")
+
+    detail = ET.SubElement(event, "detail")
+
+    # ATAK ellipse / shape sub-tree. Several ATAK forks accept slightly
+    # different schemas; emitting both <shape><ellipse/></shape> and a
+    # flat <ellipse/> covers the common dialects.
+    shape = ET.SubElement(detail, "shape")
+    ellipse = ET.SubElement(shape, "ellipse")
+    ellipse.set("major", f"{major_axis_m:.2f}")
+    ellipse.set("minor", f"{minor_axis_m:.2f}")
+    ellipse.set("angle", f"{angle_deg:.2f}")
+
+    flat_ellipse = ET.SubElement(detail, "ellipse")
+    flat_ellipse.set("major", f"{major_axis_m:.2f}")
+    flat_ellipse.set("minor", f"{minor_axis_m:.2f}")
+    flat_ellipse.set("angle", f"{angle_deg:.2f}")
+
+    stroke = ET.SubElement(detail, "strokeColor")
+    stroke.set("value", str(stroke_int))
+    weight = ET.SubElement(detail, "strokeWeight")
+    weight.set("value", "3.0")
+    fill = ET.SubElement(detail, "fillColor")
+    fill.set("value", str(fill_int))
+
+    link_attr = ET.SubElement(detail, "link_attr")
+    link_attr.set("line_color", str(stroke_int))
+    link_attr.set("line_thickness", "3")
+    link_attr.set("fill_color", str(fill_int))
+
     ET.SubElement(detail, "archive")
 
     if label:

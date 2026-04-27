@@ -42,6 +42,7 @@ from plato_pod.cot_protocol import (
     make_engagement_event,
     make_ied_marker,
     make_plume_contour_event,
+    make_plume_ellipse_event,
     make_sensor_detail,
     make_shape_event,
     make_track_detail,
@@ -51,7 +52,7 @@ from plato_pod.cot_protocol import (
 )
 from plato_pod.cot_transport import CotTransport, create_transport
 from plato_pod.geo_reference import GeoReference
-from plato_pod.plume_contour import extract_contours
+from plato_pod.plume_contour import extract_contours, fit_ellipse
 from plato_pod.virtual_layer_loader import load_virtual_layers
 
 
@@ -147,6 +148,7 @@ class CotBridgeNode(Node):
         self._plume_simplify_m: float = 0.0
         self._plume_smooth_m: float = 0.0
         self._plume_max_polygons: int = 3
+        self._plume_render: str = "polygon"   # "polygon" | "ellipse"
 
         exercise_file = str(self.get_parameter("exercise_file").value)
         if exercise_file:
@@ -296,6 +298,7 @@ class CotBridgeNode(Node):
         self._plume_simplify_m = float(bridge_cfg.get("plume_simplify_m", 0.0))
         self._plume_smooth_m = float(bridge_cfg.get("plume_smooth_m", 0.0))
         self._plume_max_polygons = int(bridge_cfg.get("plume_max_polygons", 3))
+        self._plume_render = str(bridge_cfg.get("plume_render", "polygon")).lower()
 
         if self._plume_field_name in self._spatial_env.fields:
             self.get_logger().info(
@@ -620,35 +623,83 @@ class CotBridgeNode(Node):
                 else None
             )
             for i, polygon in enumerate(level.polygons):
-                try:
-                    geo_points = [
-                        self._geo.arena_to_latlon(x, y) for x, y in polygon
-                    ]
-                except Exception as e:
-                    self.get_logger().warning(
-                        f"Geo conversion for plume contour failed: {e}"
-                    )
-                    continue
                 # Stable UID per (threshold, component) so iTAK updates
                 # the existing shape rather than spawning duplicates.
                 uid = (
                     f"platopod-plume-{self._plume_field_name}-"
                     f"{int(level.threshold)}-{i}"
                 )
-                xml = make_plume_contour_event(
-                    uid=uid,
-                    points=geo_points,
-                    threshold_value=float(level.threshold),
-                    label=f"{self._plume_field_name} ≥{level.threshold:.0f}",
-                    color=override_color,
-                    stale_seconds=15.0,   # short — plumes evolve
+                label = f"{self._plume_field_name} ≥{level.threshold:.0f}"
+
+                xml = self._render_plume_polygon(
+                    uid, polygon, level.threshold, label, override_color,
                 )
+                if xml is None:
+                    continue
                 try:
                     self._transport.send(xml)
                 except Exception as e:
                     self.get_logger().warning(
                         f"Failed to send plume contour: {e}"
                     )
+
+    def _render_plume_polygon(
+        self, uid: str, polygon: list[tuple[float, float]],
+        threshold: float, label: str, override_color: str | None,
+    ) -> str | None:
+        """Convert one polygon to a CoT event using the configured renderer.
+
+        Polygon vertices are in arena metres; this method handles the
+        geo-conversion and dispatches by self._plume_render mode.
+        """
+        if self._plume_render == "ellipse":
+            ell = fit_ellipse(polygon)
+            if ell is None:
+                return None
+            cx, cy, major_m, minor_m, angle_rad = ell
+            try:
+                clat, clon = self._geo.arena_to_latlon(cx, cy)
+            except Exception as e:
+                self.get_logger().warning(
+                    f"Geo conversion for plume ellipse failed: {e}"
+                )
+                return None
+            # Arena-metre axes scaled by GeoReference.scale_factor; rotate
+            # by north-vs-+x convention. The geo_reference uses +x = east,
+            # +y = north, so an angle measured CCW from +x equals the
+            # standard math angle. CoT angle is CW from north → 90 - angle.
+            scale = float(getattr(self._geo, "scale_factor", 1.0))
+            angle_deg_cot = (90.0 - math.degrees(angle_rad)) % 360.0
+            return make_plume_ellipse_event(
+                uid=uid,
+                center_lat=clat, center_lon=clon,
+                major_axis_m=major_m * scale,
+                minor_axis_m=minor_m * scale,
+                angle_deg=angle_deg_cot,
+                threshold_value=float(threshold),
+                label=label,
+                color=override_color,
+                stale_seconds=15.0,
+            )
+
+        # Default: polygon renderer
+        try:
+            geo_points = [
+                self._geo.arena_to_latlon(x, y) for x, y in polygon
+            ]
+        except Exception as e:
+            self.get_logger().warning(
+                f"Geo conversion for plume contour failed: {e}"
+            )
+            return None
+        return make_plume_contour_event(
+            uid=uid,
+            points=geo_points,
+            threshold_value=float(threshold),
+            label=label,
+            color=override_color,
+            stale_seconds=15.0,
+        )
 
     def _publish_world_entities(self) -> None:
         """Periodically emit CoT markers for civilians and IED hazards.

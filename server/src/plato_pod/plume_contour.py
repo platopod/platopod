@@ -88,13 +88,15 @@ def extract_contours(
     ny = max(1, int(math.ceil((ymax - ymin) / resolution)))
 
     if simplify_tolerance <= 0:
-        # Aggressive default: ~2× the grid resolution. Trades a small
-        # boundary inaccuracy for dramatically fewer vertices on the
-        # ATAK display, where each vertex becomes a draggable handle.
-        # Result: ~6-8 vertices per polygon instead of ~14.
-        simplify_tolerance = resolution * 2.0
+        # Default 4× grid resolution. Each polygon vertex becomes a
+        # draggable control-point handle on ATAK; aggressive
+        # simplification drops the handle count to ~4-5 per polygon
+        # while still tracking the plume shape for operator awareness.
+        # YAML can lower this for higher fidelity at the cost of more
+        # handles, or raise it for a cleaner demo picture.
+        simplify_tolerance = resolution * 4.0
     if smooth_amount <= 0:
-        smooth_amount = resolution * 1.5
+        smooth_amount = resolution * 2.0
     if min_polygon_area is None:
         min_polygon_area = 9.0 * resolution * resolution
 
@@ -197,6 +199,69 @@ def _polygons_above(
             continue
         polygons.append([(float(x), float(y)) for x, y in poly.exterior.coords])
     return polygons
+
+
+def fit_ellipse(
+    polygon: list[tuple[float, float]],
+) -> tuple[float, float, float, float, float] | None:
+    """Fit a covering ellipse to a polygon's vertices via PCA.
+
+    Returns:
+        (center_x, center_y, major_axis_m, minor_axis_m, angle_rad) or
+        None if the polygon is degenerate. `angle_rad` is the bearing of
+        the major axis measured CCW from +x. Axes are FULL lengths
+        (not radii).
+
+    The result is the smallest axis-aligned-in-PCA-frame box that
+    contains all vertices, expressed as an ellipse. It's a quick
+    visual approximation, not a least-squares ellipse fit — but for
+    plume contours it produces a clean, doctrine-friendly oval.
+    """
+    if len(polygon) < 3:
+        return None
+
+    n = len(polygon)
+    cx = sum(p[0] for p in polygon) / n
+    cy = sum(p[1] for p in polygon) / n
+
+    # 2x2 covariance matrix
+    sxx = sum((p[0] - cx) ** 2 for p in polygon) / n
+    syy = sum((p[1] - cy) ** 2 for p in polygon) / n
+    sxy = sum((p[0] - cx) * (p[1] - cy) for p in polygon) / n
+
+    # Eigenvalues of [[sxx, sxy], [sxy, syy]]
+    trace = sxx + syy
+    det = sxx * syy - sxy * sxy
+    disc = max(0.0, trace * trace / 4 - det)
+    sd = math.sqrt(disc)
+    lam1 = trace / 2 + sd       # larger eigenvalue (major variance)
+    lam2 = max(0.0, trace / 2 - sd)
+
+    # Eigenvector for the larger eigenvalue
+    if abs(sxy) > 1e-12:
+        angle = math.atan2(lam1 - sxx, sxy)
+    elif sxx >= syy:
+        angle = 0.0
+    else:
+        angle = math.pi / 2
+
+    # Project each vertex onto the principal axes and take the extent.
+    # This bounds the ellipse so it covers all vertices.
+    cos_a = math.cos(angle)
+    sin_a = math.sin(angle)
+    max_u = 0.0
+    max_v = 0.0
+    for x, y in polygon:
+        dx = x - cx
+        dy = y - cy
+        u = abs(dx * cos_a + dy * sin_a)
+        v = abs(-dx * sin_a + dy * cos_a)
+        if u > max_u:
+            max_u = u
+        if v > max_v:
+            max_v = v
+
+    return (cx, cy, max_u * 2.0, max_v * 2.0, angle)
 
 
 def _cell_corners(
