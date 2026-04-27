@@ -107,7 +107,7 @@ iw dev
 ```bash
 # Inside the container
 ros2 launch plato_pod atak_test.launch.py \
-  exercise_file:=/ros2_ws/config/exercises/capture-the-flag.yaml
+  exercise_file:=/ros2_ws/config/exercises/dowsett-field-ctf.yaml
 
 # In another terminal, spawn virtual robots
 curl -X POST http://localhost:8080/robots/spawn \
@@ -122,7 +122,7 @@ curl -X POST http://localhost:8080/robots/spawn \
 # Inside the container (camera required)
 ros2 launch plato_pod classroom.launch.py \
   camera_device:=4 \
-  exercise_file:=/ros2_ws/config/exercises/capture-the-flag.yaml
+  exercise_file:=/ros2_ws/config/exercises/dowsett-field-ctf.yaml
 
 # Verify camera: http://localhost:8081/camera/stream/debug
 # Dashboard: http://localhost:8080/
@@ -137,7 +137,30 @@ ros2 launch plato_pod simulation.launch.py mode:=gazebo_terrain \
   scale_factor:=1000
 ```
 
-See `server/README.md` for full documentation on all scenarios, ATAK integration, and the Python SDK.
+### Full tactical exercise (engagement + OPFOR + ROE + casualties)
+
+`world_state_node` should start first so its latched topics are available when consumers connect:
+
+```bash
+# Inside the container
+EX=/ros2_ws/config/exercises/cordon-and-search.yaml
+
+ros2 launch plato_pod world_state.launch.py exercise_file:=$EX &
+ros2 launch plato_pod simulation.launch.py mode:=lightweight exercise_file:=$EX &
+ros2 launch plato_pod los.launch.py backend:=python &
+ros2 launch plato_pod engagement.launch.py exercise_file:=$EX &
+ros2 launch plato_pod opfor.launch.py exercise_file:=$EX &
+ros2 launch plato_pod cot_bridge.launch.py exercise_file:=$EX &
+
+# Verify the world is published
+ros2 topic echo /world/cover --once
+ros2 topic echo /world/roe --once
+
+# Verify engagement events flow (then trigger one from the dashboard)
+ros2 topic echo /engagement_events
+```
+
+See [`tactical-capabilities.md`](tactical-capabilities.md) for the tactical layer overview, [`scenario-authoring.md`](scenario-authoring.md) for writing your own exercises, and [`message-catalog.md`](message-catalog.md) for the polyglot ROS2 contract.
 
 ---
 

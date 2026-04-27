@@ -17,17 +17,28 @@ hardware/     → KiCad PCB + STL chassis (not code)
 config/       → Exercise YAML templates
 ```
 
-The server is the core — it runs on ROS2 Jazzy and consists of these nodes:
+The server is the core — it runs on ROS2 Jazzy. Cross-node payloads are typed messages defined in `server/plato_pod_msgs/`; see `docs/message-catalog.md` for the polyglot contract.
+
+**Core nodes:**
 - `arena_model_node` — arena boundary, obstacles, zones from exercise YAML
-- `registry_node` — robot registry, spawning, discovery
+- `registry_node` — robot registry, spawning, discovery, `apply_damage` service
 - `api_gateway_node` — WebSocket + REST API, command pipeline, event injection
 - `robot_bridge_node` — UDP communication with physical ESP32 robots
 - `virtual_sim_node` — virtual robot kinematics (lightweight mode)
-- `sensor_engine_node` — sensor computation with plugins + Gazebo bridge
+- `sensor_engine_node` — sensor computation; publishes typed `SensorReading.msg`
 - `gazebo_bridge_node` — Gazebo lifecycle, terrain, ghost models, sensor bridging
-- `cot_bridge_node` — CoT/ATAK integration (positions, zones, sensor data)
+- `cot_bridge_node` — CoT/ATAK integration (positions, zones, sensor data, engagement events)
 - `replay_node` — GPS track replay from recorded exercises
 - `vision_node` — AprilTag detection and MJPEG streaming
+
+**Tactical nodes (engagement, OPFOR, world state, line-of-sight):**
+- `world_state_node` — single source of truth for cover, civilians, IEDs, EW emitters, jamming/dead zones, weather, ROE, weapons (publishes latched `/world/*` topics)
+- `opfor_node` — autonomous OPFOR FSM; subscribes `/world/*`, publishes `cmd_vel` and typed `FireIntent` on `/fire_weapon`
+- `engagement_node` — central fire evaluator; subscribes `FireIntent`, publishes typed `EngagementOutcome` on `/engagement_events`
+- `los_python_node` — line-of-sight service via 2D Python ray model
+- `los_gazebo_node` — line-of-sight service via Gazebo lidar (same `EvaluateLos.srv` contract; pick a backend)
+
+**Polyglot story:** the cross-node contract is the catalog of typed ROS2 messages and services in `plato_pod_msgs/`. Any language with a ROS2 binding (Python, C++, MATLAB, Rust, Java) can implement or replace any node. See `docs/message-catalog.md`.
 
 ### Physical robot communication
 
@@ -287,11 +298,11 @@ Examples:
 
 ## Module Architecture
 
-See `docs/ARCHITECTURE.md` for the full layer diagram.
+See `docs/ARCHITECTURE.md` for the full layer diagram, `docs/message-catalog.md` for the polyglot ROS2 contract, and `docs/tactical-capabilities.md` for the tactical layer.
 
 **Core abstractions (Layer 3, pure Python):**
 - `pose.py` — `RobotPose` + `PoseSource` enum (localization-agnostic)
-- `robot.py` — unified `Robot` dataclass (deployment, localization, kinematics)
+- `robot.py` — unified `Robot` dataclass (deployment, localization, kinematics, tactical fields)
 - `kinematics_model.py` — pluggable `KinematicsModel` (DifferentialDrive, Omnidirectional)
 - `sensor_engine.py` — per-robot state, environment context, Gazebo bridge multiplexing
 - `spatial_field.py` — `SpatialField` protocol (GaussianPlume, Elevation, Uniform, Composite)
@@ -300,4 +311,16 @@ See `docs/ARCHITECTURE.md` for the full layer diagram.
 - `replay.py` — GPX/YAML track loading + interpolation
 - `geo_reference.py` — WGS84 arena↔lat/lon with scale factor
 - `cot_protocol.py` — CoT XML generation/parsing, MIL-STD-2525B type codes
-- `command_pipeline.py` — velocity filtering with terrain speed modifier
+- `command_pipeline.py` — velocity filtering: state → mobility → fuel → speed → terrain → boundary → collision
+
+**Tactical abstractions (Layer 3, pure Python):**
+- `world_state.py` — `WorldState` dataclass + `world_state_from_config(yaml)` (single source of truth)
+- `engagement.py` — `evaluate_fire`, `WeaponSpec`, `EngagementOutcome`
+- `line_of_sight.py` — `has_line_of_sight` 2D + height-sample model
+- `weather.py` — `WeatherState`, `visibility_factor`
+- `health.py` — `apply_damage`, `mobility_factor`, `fire_capability`, status thresholds
+- `behavior.py` — `BehaviorTree` FSM for OPFOR
+- `comms.py` — `evaluate_comms` with jamming/dead zones
+- `logistics.py` — `Logistics` (fuel/ammo/water), `consume_*`, `resupply`
+- `roe.py` — `check_fire_roe` (weapons hold/tight/free + civilian/friendly checks)
+- `sensor_plugins/` — gas, gps, lidar, sonar, fof, thermal, rangefinder, ied_detector, df_receiver, uav_camera
