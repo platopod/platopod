@@ -1,0 +1,148 @@
+# Joint Force Coordination — multi-domain
+# Multiple platoons, JTAC + UAV ISR, CAS, GPS jamming.
+# Exercises: UAV camera + virtual aircraft, CAS via inject_event,
+# DF receiver vs EW emitter, jamming zones affecting GPS/comms.
+
+exercise:
+  id: "joint-coordination"
+  name: "Joint Force Coordination"
+  description: >
+    Two blue platoons coordinate via TAK; JTAC observes through a UAV feed
+    and calls in close air support. Red EW emitter and GPS jammer present.
+
+  geo:
+    origin_lat: -35.293935
+    origin_lon: 149.166421
+    origin_alt: 580.0
+    rotation_deg: 0.0
+    scale_factor: 150.0
+
+  arena:
+    boundary:
+      - [0.0, 0.0]
+      - [0.852, 0.0]
+      - [0.852, 0.723]
+      - [0.0, 0.723]
+    obstacles: []
+
+  weather:
+    visibility_m: 2000
+    fog_density: 0.0
+    time_of_day: 13.0
+
+  time_compression: 4.0    # 4x real-time during movement phase
+
+  weapons:
+    M4_carbine:
+      max_range_m: 400
+      base_pok_at_100m: 0.6
+      falloff_per_100m: 0.15
+      damage: 1.0
+      ammo_capacity: 30
+    AK74:
+      max_range_m: 350
+      base_pok_at_100m: 0.5
+      falloff_per_100m: 0.12
+      damage: 1.0
+      ammo_capacity: 30
+    "30mm_cannon":
+      max_range_m: 4000
+      base_pok_at_100m: 0.85
+      falloff_per_100m: 0.04
+      damage: 1.0
+      ammo_capacity: 200
+      suppress_radius_m: 15.0
+
+  roe:
+    fire_permission: "weapons_tight"
+    civilian_proximity_m: 20
+    require_target_id: true
+    friendly_fire: "critical"
+
+  robots:
+    physical:
+      # Platoon A
+      - tag_id: 1
+        team: "blue"
+        vehicle_role: "soldier"
+        weapons: ["M4_carbine"]
+        sensor_preset: "infantry"
+      - tag_id: 2
+        team: "blue"
+        vehicle_role: "soldier"
+        weapons: ["M4_carbine"]
+        sensor_preset: "infantry"
+      # Platoon B
+      - tag_id: 3
+        team: "blue"
+        vehicle_role: "soldier"
+        weapons: ["M4_carbine"]
+        sensor_preset: "infantry"
+      - tag_id: 4
+        team: "blue"
+        vehicle_role: "soldier"
+        weapons: ["M4_carbine"]
+        sensor_preset: "infantry"
+    virtual: []
+
+  opfor:
+    - id: 100
+      vehicle_role: "hostile"
+      position: [0.70, 0.40]
+      weapons: ["AK74"]
+      behavior: "patrol_then_defend"
+      patrol_route:
+        - [0.65, 0.35]
+        - [0.75, 0.45]
+        - [0.70, 0.40]
+    - id: 101
+      vehicle_role: "hostile"
+      position: [0.80, 0.55]
+      weapons: ["AK74"]
+      behavior: "patrol_then_defend"
+      patrol_route:
+        - [0.78, 0.50]
+        - [0.82, 0.60]
+    # Virtual UAV — racetrack pattern overhead
+    - id: 200
+      vehicle_role: "uav"
+      team: "blue"
+      position: [0.40, 0.40]
+      weapons: []
+      behavior: "scripted_path"
+      patrol_route:
+        - [0.20, 0.10]
+        - [0.80, 0.10]
+        - [0.80, 0.65]
+        - [0.20, 0.65]
+      detection_range_m: 1.0
+      max_linear_speed: 0.05    # arena units/s
+
+  virtual_layers:
+    jamming_zones:
+      - position: [0.65, 0.45]
+        radius_m: 0.20            # arena units
+        strength: 0.8
+        label: "GPS_jammer_alpha"
+
+    ew_emitters:
+      - position: [0.78, 0.40]
+        frequency_mhz: 144.0
+        signal_strength: 1.0
+        label: "comms_emitter"
+
+    cover_polygons:
+      - vertices:
+          - [0.55, 0.30]
+          - [0.65, 0.30]
+          - [0.65, 0.40]
+          - [0.55, 0.40]
+        cover_value: 0.6
+        label: "wood_line"
+
+  sensors_available:
+    - thermal
+    - rangefinder
+    - df_receiver
+    - uav_camera
+    - gps

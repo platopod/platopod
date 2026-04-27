@@ -1,0 +1,115 @@
+# CBRN Recon Patrol — Dowsett Field
+# Cadet team identifies a chemical release source, may encounter hostile recon.
+# Exercises: gas plume + MOX sensor twin, thermal detection, weapons engagement,
+# casualty model under gas exposure.
+
+exercise:
+  id: "cbrn-recon-patrol"
+  name: "CBRN Recon Patrol"
+  description: >
+    Four cadets advance across Dowsett Field to identify a chemical release
+    source and report. Small enemy element may interdict.
+
+  geo:
+    origin_lat: -35.293935
+    origin_lon: 149.166421
+    origin_alt: 580.0
+    rotation_deg: 0.0
+    scale_factor: 150.0
+
+  arena:
+    boundary:
+      - [0.0, 0.0]
+      - [0.852, 0.0]
+      - [0.852, 0.723]
+      - [0.0, 0.723]
+    obstacles: []
+
+  weather:
+    visibility_m: 1500
+    wind_speed: 2.0
+    wind_direction: 0.0   # blowing east (radians)
+    fog_density: 0.0
+    time_of_day: 9.0
+
+  weapons:
+    M4_carbine:
+      max_range_m: 400
+      base_pok_at_100m: 0.6
+      falloff_per_100m: 0.15
+      damage: 1.0
+      ammo_capacity: 30
+    AK74:
+      max_range_m: 350
+      base_pok_at_100m: 0.5
+      falloff_per_100m: 0.12
+      damage: 1.0
+      ammo_capacity: 30
+
+  roe:
+    fire_permission: "weapons_tight"
+    civilian_proximity_m: 15
+    require_target_id: true
+    friendly_fire: "critical"
+
+  robots:
+    physical:
+      - tag_id: 1
+        team: "blue"
+        vehicle_role: "cbrn_recon"
+        weapons: ["M4_carbine"]
+        sensor_preset: "infantry"
+        logistics:
+          fuel: 1.0
+          ammo: {M4_carbine: 30}
+      - tag_id: 2
+        team: "blue"
+        vehicle_role: "recon"
+        weapons: ["M4_carbine"]
+        sensor_preset: "infantry"
+      - tag_id: 3
+        team: "blue"
+        vehicle_role: "recon"
+        weapons: ["M4_carbine"]
+        sensor_preset: "infantry"
+      - tag_id: 4
+        team: "blue"
+        vehicle_role: "recon"
+        weapons: ["M4_carbine"]
+        sensor_preset: "infantry"
+    virtual: []
+
+  opfor:
+    - id: 100
+      vehicle_role: "hostile"
+      position: [0.65, 0.45]
+      weapons: ["AK74"]
+      behavior: "patrol_then_defend"
+      patrol_route:
+        - [0.55, 0.40]
+        - [0.70, 0.50]
+        - [0.65, 0.30]
+      detection_range_m: 0.4    # arena units; ~60m at 150x scale
+      engagement_range_m: 0.3
+      retreat_health_threshold: 0.4
+    - id: 101
+      vehicle_role: "hostile"
+      position: [0.75, 0.55]
+      weapons: ["AK74"]
+      behavior: "patrol_then_defend"
+      patrol_route:
+        - [0.70, 0.55]
+        - [0.78, 0.60]
+
+  virtual_layers:
+    gas_sources:
+      - position: [0.6, 0.6]
+        emission_rate_g_per_s: 50
+        diffusivity: 0.05
+        label: "Source-Alpha"
+
+  sensors_available:
+    - gas
+    - thermal
+    - rangefinder
+    - gps

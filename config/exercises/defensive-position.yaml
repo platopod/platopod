@@ -1,0 +1,140 @@
+# Defensive Position — Dowsett Field
+# Cadets establish a perimeter, OPFOR attacks in waves with indirect fire.
+# Exercises: ROE, weapons engagement, ammo logistics + resupply, casualty
+# CASEVAC, comms degradation in dead zones.
+
+exercise:
+  id: "defensive-position"
+  name: "Defensive Position Defence"
+  description: >
+    Blue team holds a defensive perimeter; OPFOR launches a coordinated
+    multi-wave assault with supporting indirect fire.
+
+  geo:
+    origin_lat: -35.293935
+    origin_lon: 149.166421
+    origin_alt: 580.0
+    rotation_deg: 0.0
+    scale_factor: 150.0
+
+  arena:
+    boundary:
+      - [0.0, 0.0]
+      - [0.852, 0.0]
+      - [0.852, 0.723]
+      - [0.0, 0.723]
+    obstacles: []
+
+  weather:
+    visibility_m: 800
+    wind_speed: 1.0
+    fog_density: 0.1
+    time_of_day: 14.0
+
+  weapons:
+    M4_carbine:
+      max_range_m: 400
+      base_pok_at_100m: 0.6
+      falloff_per_100m: 0.15
+      damage: 1.0
+      ammo_capacity: 30
+    M249_SAW:
+      max_range_m: 600
+      base_pok_at_100m: 0.5
+      falloff_per_100m: 0.10
+      damage: 1.0
+      ammo_capacity: 200
+      suppress_radius_m: 8.0
+    AK74:
+      max_range_m: 350
+      base_pok_at_100m: 0.5
+      falloff_per_100m: 0.12
+      damage: 1.0
+      ammo_capacity: 30
+    "120mm_mortar":
+      max_range_m: 7000
+      base_pok_at_100m: 0.7
+      falloff_per_100m: 0.0
+      damage: 1.0
+      ammo_capacity: 6
+      suppress_radius_m: 25.0
+
+  roe:
+    fire_permission: "weapons_free"     # opens once contact made
+    civilian_proximity_m: 0             # no civilians here
+    friendly_fire: "violation"
+
+  robots:
+    physical:
+      - tag_id: 1
+        team: "blue"
+        vehicle_role: "soldier"
+        weapons: ["M4_carbine"]
+        sensor_preset: "infantry"
+        logistics:
+          fuel: 1.0
+          ammo: {M4_carbine: 60}
+      - tag_id: 2
+        team: "blue"
+        vehicle_role: "soldier"
+        weapons: ["M249_SAW"]
+        sensor_preset: "infantry"
+        logistics:
+          ammo: {M249_SAW: 400}
+      - tag_id: 3
+        team: "blue"
+        vehicle_role: "soldier"
+        weapons: ["M4_carbine"]
+        sensor_preset: "infantry"
+        logistics:
+          ammo: {M4_carbine: 60}
+    virtual: []
+
+  opfor:
+    - id: 100
+      vehicle_role: "hostile"
+      position: [0.10, 0.10]
+      weapons: ["AK74"]
+      behavior: "patrol_then_defend"
+      patrol_route:
+        - [0.20, 0.20]
+        - [0.30, 0.10]
+      retreat_health_threshold: 0.3
+    - id: 101
+      vehicle_role: "hostile"
+      position: [0.10, 0.65]
+      weapons: ["AK74"]
+      behavior: "patrol_then_defend"
+      patrol_route:
+        - [0.20, 0.55]
+        - [0.30, 0.65]
+    - id: 102
+      vehicle_role: "hostile"
+      position: [0.05, 0.40]
+      weapons: ["AK74"]
+      behavior: "patrol_then_defend"
+      patrol_route:
+        - [0.20, 0.40]
+
+  virtual_layers:
+    cover_polygons:
+      - vertices:
+          - [0.40, 0.30]
+          - [0.46, 0.30]
+          - [0.46, 0.42]
+          - [0.40, 0.42]
+        cover_value: 0.7
+        label: "rocks_centre"
+
+    comms_dead_zones:
+      - vertices:
+          - [0.0, 0.0]
+          - [0.20, 0.0]
+          - [0.20, 0.15]
+          - [0.0, 0.15]
+        label: "ridge_shadow_sw"
+
+  sensors_available:
+    - thermal
+    - rangefinder
+    - gps
