@@ -142,8 +142,11 @@ class CotBridgeNode(Node):
         self._spatial_env = None    # EnvironmentContext | None
         self._plume_field_name: str = "gas"
         self._plume_thresholds: list[float] = [10.0, 100.0, 500.0]
-        self._plume_grid_size: int = 60
+        self._plume_colors: list[str] = []   # parallel to _plume_thresholds; "" → auto
+        self._plume_grid_size: int = 80
         self._plume_simplify_m: float = 0.0
+        self._plume_smooth_m: float = 0.0
+        self._plume_max_polygons: int = 3
 
         exercise_file = str(self.get_parameter("exercise_file").value)
         if exercise_file:
@@ -285,8 +288,14 @@ class CotBridgeNode(Node):
         thresholds = bridge_cfg.get("plume_thresholds")
         if isinstance(thresholds, list) and thresholds:
             self._plume_thresholds = [float(t) for t in thresholds]
-        self._plume_grid_size = int(bridge_cfg.get("plume_grid_size", 60))
+        # Optional per-threshold ARGB colours; empty string ⇒ doctrine default
+        colors = bridge_cfg.get("plume_colors")
+        if isinstance(colors, list):
+            self._plume_colors = [str(c) for c in colors]
+        self._plume_grid_size = int(bridge_cfg.get("plume_grid_size", 80))
         self._plume_simplify_m = float(bridge_cfg.get("plume_simplify_m", 0.0))
+        self._plume_smooth_m = float(bridge_cfg.get("plume_smooth_m", 0.0))
+        self._plume_max_polygons = int(bridge_cfg.get("plume_max_polygons", 3))
 
         if self._plume_field_name in self._spatial_env.fields:
             self.get_logger().info(
@@ -596,12 +605,20 @@ class CotBridgeNode(Node):
                 grid_size=self._plume_grid_size,
                 time=t,
                 simplify_tolerance=self._plume_simplify_m,
+                smooth_amount=self._plume_smooth_m,
+                max_polygons_per_level=self._plume_max_polygons,
             )
         except Exception as e:
             self.get_logger().warning(f"Contour extraction failed: {e}")
             return
 
-        for level in levels:
+        for level_idx, level in enumerate(levels):
+            override_color = (
+                self._plume_colors[level_idx]
+                if level_idx < len(self._plume_colors)
+                and self._plume_colors[level_idx]
+                else None
+            )
             for i, polygon in enumerate(level.polygons):
                 try:
                     geo_points = [
@@ -623,6 +640,7 @@ class CotBridgeNode(Node):
                     points=geo_points,
                     threshold_value=float(level.threshold),
                     label=f"{self._plume_field_name} ≥{level.threshold:.0f}",
+                    color=override_color,
                     stale_seconds=15.0,   # short — plumes evolve
                 )
                 try:

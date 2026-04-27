@@ -112,12 +112,20 @@ exercise:
         diffusion_coeff: 0.05
 
   # Plume rendering: cot_bridge_node samples this field and emits nested
-  # CoT contour shapes to ATAK. Thresholds in the field's natural units.
+  # CoT contour shapes to ATAK following NATO CBRN doctrine colours.
+  # Thresholds are in the gas field's natural concentration units; the
+  # GaussianPlumeField produces O(1000) near the source and decays.
   cot_bridge:
     plume_field: "gas"
-    plume_thresholds: [10.0, 100.0, 500.0]
-    plume_grid_size: 60
-    plume_simplify_m: 0.005
+    plume_thresholds: [50.0, 300.0, 1500.0]
+    plume_colors:
+      - "ffffff00"   # yellow — outer caution / detect ring
+      - "ffff8000"   # orange — cross-contamination zone
+      - "ffff0000"   # red    — acute / IDLH core
+    plume_grid_size: 80
+    plume_smooth_m: 0.0       # auto = grid_resolution × 1.5
+    plume_simplify_m: 0.0     # auto = grid_resolution / 2
+    plume_max_polygons: 2     # at most 2 islands per threshold
 
   sensors_available:
     - gas

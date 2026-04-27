@@ -1,20 +1,21 @@
-"""Plume contour extraction — turn a SpatialField into polygon hazard zones.
+"""Plume contour extraction — turn a SpatialField into smooth hazard polygons.
 
 Given a `SpatialField` (gas concentration, radiation, etc.) and a bounding
-box, sample on a grid and return the boundary polygons of the regions where
-the field meets or exceeds each threshold. Multiple disconnected components
-become separate polygons — natural for plumes that wrap around obstacles or
-have been cut by wind.
+box, sample on a grid and return the boundary polygons of regions where
+the field meets or exceeds each threshold. Output is a small number of
+smooth polygons per threshold — suitable for direct rendering on ATAK as
+nested CBRN hazard zones.
 
-Pure Python; no ROS2 dependency. Used by `cot_bridge_node` to render the
-contamination picture on iTAK/ATAK.
+Pipeline:
+  1. Sample the field on a regular grid.
+  2. Mark cells with any corner above the threshold; build their union.
+  3. **Morphological close** (buffer +ε then -ε) to fill small gaps and
+     round the cell-aligned boundary into a smooth blob.
+  4. Drop islands smaller than a few cells (configurable).
+  5. Apply Douglas-Peucker simplification (configurable).
+  6. Cap the number of polygons per threshold to avoid clutter.
 
-Implementation note: we use a square-cell-union approach rather than full
-marching-squares interpolation. The boundary tracks the grid resolution
-exactly, which is fine for ATAK rendering (lat/lon resolution is much
-coarser than the ~1m grid). When the visualiser needs sub-cell precision
-(e.g. for analytic Gaussian plumes shown at high zoom), refine the grid;
-the algorithm is O(N) in cell count and Shapely's union is fast.
+Pure Python; uses Shapely for geometry ops (already a project dependency).
 """
 
 from __future__ import annotations
@@ -32,7 +33,8 @@ class ContourLevel:
     """One threshold level extracted from a SpatialField sample.
 
     `polygons` is a list of polygon vertex lists — one per disconnected
-    component. Each polygon is closed (first and last vertex equal).
+    component, ordered largest-first. Each polygon is closed (first and
+    last vertex equal).
     """
     threshold: float
     label: str
@@ -44,38 +46,55 @@ def extract_contours(
     bbox: tuple[float, float, float, float],
     thresholds: list[float],
     *,
-    grid_size: int = 60,
+    grid_size: int = 80,
     time: float = 0.0,
     simplify_tolerance: float = 0.0,
+    smooth_amount: float = 0.0,
+    min_polygon_area: float | None = None,
+    max_polygons_per_level: int = 3,
 ) -> list[ContourLevel]:
-    """Extract contour polygons of `field` for each value in `thresholds`.
+    """Extract contour polygons of `field` at each value in `thresholds`.
 
     Args:
         field: any object with `.evaluate(x, y, t) -> float`.
         bbox: (xmin, ymin, xmax, ymax) in arena metres.
-        thresholds: ascending list of threshold values. Highest threshold
-            yields the innermost polygon.
-        grid_size: number of samples along the longer bbox axis. Increase
-            for smoother contours; decrease for cheaper compute.
+        thresholds: ascending list of threshold values. Higher threshold
+            = innermost / more dangerous polygon.
+        grid_size: number of samples along the longer bbox axis. Default
+            80; bump for smoother contours, drop for cheaper compute.
         time: time argument passed to `field.evaluate`.
-        simplify_tolerance: Douglas-Peucker tolerance (arena metres) for
-            polygon simplification. 0 disables simplification.
+        simplify_tolerance: Douglas-Peucker tolerance (arena metres).
+            0 picks `grid_resolution / 2` automatically.
+        smooth_amount: morphological close radius (arena metres). 0 picks
+            `grid_resolution * 1.5` automatically — strong enough to
+            merge cell-aligned blocks into a smooth blob.
+        min_polygon_area: drop polygons smaller than this (arena m²). 0
+            picks `9 × grid_resolution²` (≈ 3×3 cell cluster).
+        max_polygons_per_level: keep only the N largest polygons at each
+            threshold. Default 3 — prevents dozens of tiny islands from
+            cluttering the operator's screen.
 
     Returns:
-        One ContourLevel per threshold, in input order. Empty thresholds
-        (no cell met or exceeded the value) still appear with `polygons=[]`.
+        One ContourLevel per threshold, in input order. Polygons within
+        a level are sorted largest-first.
     """
     xmin, ymin, xmax, ymax = bbox
     span = max(xmax - xmin, ymax - ymin)
     if span <= 0:
         return [ContourLevel(t, "", []) for t in thresholds]
 
-    # Square cells so the marching-squares-like boundary tracks correctly.
     resolution = span / max(1, grid_size)
     nx = max(1, int(math.ceil((xmax - xmin) / resolution)))
     ny = max(1, int(math.ceil((ymax - ymin) / resolution)))
 
-    # Sample once; reuse for every threshold.
+    if simplify_tolerance <= 0:
+        simplify_tolerance = resolution / 2.0
+    if smooth_amount <= 0:
+        smooth_amount = resolution * 1.5
+    if min_polygon_area is None:
+        min_polygon_area = 9.0 * resolution * resolution
+
+    # Sample grid once; reuse for every threshold.
     grid: list[list[float]] = [
         [field.evaluate(xmin + ix * resolution, ymin + iy * resolution, time)
          for iy in range(ny + 1)]
@@ -86,7 +105,10 @@ def extract_contours(
     for thr in thresholds:
         polys = _polygons_above(
             grid, xmin, ymin, resolution, nx, ny, thr,
+            smooth_amount=smooth_amount,
             simplify_tolerance=simplify_tolerance,
+            min_polygon_area=min_polygon_area,
+            max_polygons=max_polygons_per_level,
         )
         out.append(ContourLevel(threshold=thr, label="", polygons=polys))
     return out
@@ -96,24 +118,24 @@ def _polygons_above(
     grid: list[list[float]],
     xmin: float, ymin: float, resolution: float,
     nx: int, ny: int, threshold: float,
-    *, simplify_tolerance: float = 0.0,
+    *,
+    smooth_amount: float,
+    simplify_tolerance: float,
+    min_polygon_area: float,
+    max_polygons: int,
 ) -> list[list[tuple[float, float]]]:
-    """Return outer-boundary polygons of cells where corner samples >= threshold.
+    """Cell-union → morphological close → simplify → cap → list of polygons.
 
     A cell is "above" if any of its four corner samples reach the threshold.
-    Strictly speaking this overestimates the contour by half a cell, but the
-    overestimate is consistent with NATO doctrine practice — better to flag
-    a slightly-too-large hazard zone than miss the edge.
+    The half-cell overestimate is consistent with NATO doctrine practice —
+    flag a slightly-too-large hazard zone rather than miss the edge.
     """
-    # Mark cells that have at least one corner above the threshold
     marked: list[list[bool]] = [
         [
-            any((
-                grid[ix][iy] >= threshold,
-                grid[ix + 1][iy] >= threshold,
-                grid[ix][iy + 1] >= threshold,
-                grid[ix + 1][iy + 1] >= threshold,
-            ))
+            (grid[ix][iy] >= threshold
+             or grid[ix + 1][iy] >= threshold
+             or grid[ix][iy + 1] >= threshold
+             or grid[ix + 1][iy + 1] >= threshold)
             for iy in range(ny)
         ]
         for ix in range(nx)
@@ -126,11 +148,11 @@ def _polygons_above(
         from shapely.geometry import Polygon
         from shapely.ops import unary_union
     except ImportError:
-        # Without shapely we fall back to per-cell rectangles (no merge).
+        # Without shapely: return per-cell rectangles (no merge / smoothing).
         return [
             _cell_corners(xmin, ymin, ix, iy, resolution)
             for ix in range(nx) for iy in range(ny) if marked[ix][iy]
-        ]
+        ][:max_polygons]
 
     cells = [
         Polygon(_cell_corners(xmin, ymin, ix, iy, resolution))
@@ -141,20 +163,35 @@ def _polygons_above(
 
     union = unary_union(cells)
 
-    polygons: list[list[tuple[float, float]]] = []
+    # Morphological close: dilate then erode. Fills small gaps inside the
+    # blob and rounds the cell-aligned boundary into a smooth curve.
+    if smooth_amount > 0:
+        union = union.buffer(smooth_amount, join_style=1).buffer(
+            -smooth_amount, join_style=1,
+        )
 
-    def _emit(poly):
-        coords = list(poly.exterior.coords)
-        if simplify_tolerance > 0:
-            simp = poly.simplify(simplify_tolerance, preserve_topology=True)
-            coords = list(simp.exterior.coords)
-        polygons.append([(float(x), float(y)) for x, y in coords])
+    if union.is_empty:
+        return []
 
+    # Collect polygons, drop tiny islands, sort largest-first.
+    candidates: list[tuple[float, "Polygon"]] = []
     if union.geom_type == "Polygon":
-        _emit(union)
+        if union.area >= min_polygon_area:
+            candidates.append((union.area, union))
     elif union.geom_type == "MultiPolygon":
         for p in union.geoms:
-            _emit(p)
+            if p.area >= min_polygon_area:
+                candidates.append((p.area, p))
+    candidates.sort(key=lambda x: -x[0])
+    candidates = candidates[:max_polygons]
+
+    polygons: list[list[tuple[float, float]]] = []
+    for _, poly in candidates:
+        if simplify_tolerance > 0:
+            poly = poly.simplify(simplify_tolerance, preserve_topology=True)
+        if poly.is_empty or poly.geom_type != "Polygon":
+            continue
+        polygons.append([(float(x), float(y)) for x, y in poly.exterior.coords])
     return polygons
 
 
