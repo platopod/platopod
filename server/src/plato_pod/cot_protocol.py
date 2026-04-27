@@ -577,10 +577,10 @@ def _make_ellipse_drawing(
     link_attr.set("line_thickness", "3")
     link_attr.set("fill_color", str(fill_int))
 
-    # Deliberately NO <archive> element — plume contours are transient
-    # (concentration evolves second-by-second). Without archive ATAK lets
-    # the ellipse expire naturally at stale_seconds rather than persist
-    # in the local database forever.
+    # iTAK requires <archive> for u-d-c ellipses to render reliably.
+    # Cleanup of stale archived markers is handled by the diff-tracking
+    # tombstone mechanism in cot_bridge_node.
+    ET.SubElement(detail, "archive")
 
     if label:
         contact = ET.SubElement(detail, "contact")
@@ -654,7 +654,13 @@ def _make_polygon_drawing(
     link_attr.set("line_thickness", "3")
     link_attr.set("fill_color", str(fill_int))
 
-    # No <archive>: polygon plume contours are transient too.
+    # iTAK requires <archive> for u-d-r / u-d-f shapes to render at all.
+    # The "stuck markers" risk is now handled by cot_bridge_node's
+    # diff-tracking tombstone mechanism — when a UID disappears from the
+    # active set, a delete event is sent. Net effect: visible while the
+    # bridge is alive, gone when it stops or the contour shrinks below
+    # threshold, and not stuck across scenarios.
+    ET.SubElement(detail, "archive")
 
     if label:
         contact = ET.SubElement(detail, "contact")
