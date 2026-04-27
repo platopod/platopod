@@ -16,6 +16,8 @@ from rclpy.node import Node
 
 from plato_pod_msgs.msg import (
     ArenaModel as ArenaModelMsg,
+    FireIntent as FireIntentMsg,
+    Observation as ObservationMsg,
     RobotStatusList as RobotStatusListMsg,
 )
 from plato_pod_msgs.srv import ListRobots, RemoveRobot, ResetRobot, SpawnVirtual
@@ -140,6 +142,8 @@ class ApiGatewayNode(Node):
             on_reset=self._call_reset,
             on_list_robots=self._call_list_robots,
             on_inject_event=self._handle_inject_event,
+            on_fire_intent=self._publish_fire_intent,
+            on_observation=self._publish_observation,
             admin_token=admin_token,
             max_linear=self._max_linear,
             max_angular=self._max_angular,
@@ -230,6 +234,55 @@ class ApiGatewayNode(Node):
         msg.linear.x = float(linear_x)
         msg.angular.z = float(angular_z)
         self._cmd_vel_pubs[robot_id].publish(msg)
+
+    def _ensure_fire_intent_pub(self):
+        if not hasattr(self, "_fire_intent_pub_obj"):
+            self._fire_intent_pub_obj = self.create_publisher(
+                FireIntentMsg, "/fire_weapon", 10,
+            )
+            self._next_fire_seq = 0
+        return self._fire_intent_pub_obj
+
+    def _ensure_observation_pub(self):
+        if not hasattr(self, "_observation_pub_obj"):
+            self._observation_pub_obj = self.create_publisher(
+                ObservationMsg, "/report_observation", 10,
+            )
+        return self._observation_pub_obj
+
+    def _publish_fire_intent(
+        self, robot_id: int, target_id: int | None,
+        weapon: str, target_position: tuple[float, float] | None,
+    ) -> None:
+        """Forward a WebSocket fire_weapon as a typed FireIntent message."""
+        pub = self._ensure_fire_intent_pub()
+        intent = FireIntentMsg()
+        intent.actor_id = int(robot_id)
+        intent.target_id = int(target_id) if target_id is not None else -1
+        intent.weapon = str(weapon)
+        if target_position is not None:
+            intent.has_target_position = True
+            intent.target_x = float(target_position[0])
+            intent.target_y = float(target_position[1])
+        else:
+            intent.has_target_position = False
+            intent.target_x = 0.0
+            intent.target_y = 0.0
+        self._next_fire_seq += 1
+        intent.source_seq = self._next_fire_seq
+        pub.publish(intent)
+
+    def _publish_observation(
+        self, robot_id: int, target_id: int, classification: str,
+    ) -> None:
+        """Forward a report_observation event as a typed Observation message."""
+        pub = self._ensure_observation_pub()
+        obs = ObservationMsg()
+        obs.actor_id = int(robot_id)
+        obs.target_id = int(target_id)
+        obs.classification = str(classification)
+        obs.confidence = 1.0
+        pub.publish(obs)
 
     @staticmethod
     def _wait_for_future(future, timeout: float = 2.0):

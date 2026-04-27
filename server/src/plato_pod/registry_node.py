@@ -20,6 +20,7 @@ from plato_pod_msgs.msg import (
     TagDetections,
 )
 from plato_pod_msgs.srv import (
+    ApplyDamage,
     ListRobots,
     RegisterPhysical,
     RemoveRobot,
@@ -69,6 +70,9 @@ class RegistryNode(Node):
         )
         self.create_service(
             ListRobots, "~/list_robots", self._handle_list_robots
+        )
+        self.create_service(
+            ApplyDamage, "~/apply_damage", self._handle_apply_damage
         )
 
         # Subscribers
@@ -141,12 +145,21 @@ class RegistryNode(Node):
     ) -> SpawnVirtual.Response:
         """Handle virtual robot spawn request."""
         radius = request.radius if request.radius > 0 else self._default_radius
+        # Optional tactical fields with safe defaults
+        team = request.team if request.team else None
+        vehicle_role = request.vehicle_role if request.vehicle_role else "default"
+        health = request.health if request.health > 0.0 else 1.0
+        weapons = list(request.weapons) if request.weapons else []
         ok, robot_id, message = self._registry.spawn_virtual(
             x=request.x,
             y=request.y,
             theta=request.theta,
             radius=radius,
             boundary=self._arena_boundary,
+            team=team,
+            vehicle_role=vehicle_role,
+            health=health,
+            weapons=weapons,
         )
         response.success = ok
         response.robot_id = robot_id
@@ -188,6 +201,25 @@ class RegistryNode(Node):
         response.robots = [self._entry_to_msg(r) for r in robots]
         return response
 
+    def _handle_apply_damage(
+        self, request: ApplyDamage.Request, response: ApplyDamage.Response
+    ) -> ApplyDamage.Response:
+        """Subtract damage from a robot's health and update its status."""
+        ok, new_health, new_status, message = self._registry.apply_damage(
+            request.robot_id, float(request.damage),
+        )
+        response.success = ok
+        response.new_health = float(new_health)
+        response.new_status = new_status
+        response.message = message
+        if ok:
+            self.get_logger().info(
+                f"Damage applied: id={request.robot_id} "
+                f"reason={request.reason} health→{new_health:.2f} "
+                f"status={new_status}"
+            )
+        return response
+
     def _subscribe_virtual_pose(self, robot_id: int) -> None:
         """Create a pose subscription for a virtual robot."""
         topic = f"/robot_{robot_id}/pose"
@@ -226,6 +258,11 @@ class RegistryNode(Node):
         msg.status = entry.status
         msg.localization_id = entry.localization_id
         msg.localization_source = entry.localization_source.value
+        msg.team = entry.team or ""
+        msg.vehicle_role = entry.vehicle_role
+        msg.health = float(entry.health)
+        msg.weapons = list(entry.weapons)
+        msg.thermal_signature = float(entry.thermal_signature)
         return msg
 
 

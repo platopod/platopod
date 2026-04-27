@@ -15,18 +15,21 @@ import threading
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
 
 from plato_pod_msgs.msg import (
     ArenaModel as ArenaModelMsg,
+    EngagementOutcome as EngagementOutcomeMsg,
     NavGoal,
     RobotStatusList as RobotStatusListMsg,
+    SensorReading as SensorReadingMsg,
 )
 
 from plato_pod.cot_protocol import (
     VEHICLE_ROLE_TO_COT_TYPE,
+    make_casualty_event,
     make_contact_detail,
     make_cot_event,
+    make_engagement_event,
     make_sensor_detail,
     make_shape_event,
     make_track_detail,
@@ -133,6 +136,10 @@ class CotBridgeNode(Node):
             ArenaModelMsg, "/arena/model",
             self._arena_model_callback, 10,
         )
+        self.create_subscription(
+            EngagementOutcomeMsg, "/engagement_events",
+            self._engagement_event_callback, 10,
+        )
 
         # Publisher for inbound nav goals
         self._pub_nav_goal = self.create_publisher(NavGoal, "/cot/nav_goal", 10)
@@ -209,6 +216,9 @@ class CotBridgeNode(Node):
                     "radius": r.radius,
                     "deployment": r.deployment,
                     "status": r.status,
+                    "team": r.team,
+                    "vehicle_role": r.vehicle_role,
+                    "health": r.health if r.health > 0.0 else 1.0,
                 }
                 for r in msg.robots
                 if r.status == "active"
@@ -222,23 +232,25 @@ class CotBridgeNode(Node):
             self._subscribed_robots = current_ids
 
     def _subscribe_robot_sensors(self, robot_id: int) -> None:
-        """Subscribe to all sensor topics for a robot."""
-        # Sensor engine publishes to /robot_{id}/sensors/{name} as JSON strings.
-        # We use a wildcard-style approach: subscribe to a known set of sensors.
+        """Subscribe to typed SensorReading topics for a robot."""
         for sensor_name in ["gas", "gps", "lidar_2d", "sonar", "fof"]:
             topic = f"/robot_{robot_id}/sensors/{sensor_name}"
 
-            def callback(msg: String, rid=robot_id, sname=sensor_name) -> None:
+            def callback(msg: SensorReadingMsg, rid=robot_id, sname=sensor_name) -> None:
                 try:
-                    data = json.loads(msg.data)
-                    with self._sensor_lock:
-                        if rid not in self._robot_sensors:
-                            self._robot_sensors[rid] = {}
-                        self._robot_sensors[rid][sname] = data.get("data", {})
-                except (json.JSONDecodeError, KeyError):
-                    pass
+                    payload = (
+                        json.loads(msg.payload)
+                        if msg.payload_format == "json" and msg.payload
+                        else {}
+                    )
+                except (json.JSONDecodeError, TypeError):
+                    payload = {}
+                with self._sensor_lock:
+                    if rid not in self._robot_sensors:
+                        self._robot_sensors[rid] = {}
+                    self._robot_sensors[rid][sname] = payload
 
-            self.create_subscription(String, topic, callback, 10)
+            self.create_subscription(SensorReadingMsg, topic, callback, 10)
 
     def _arena_model_callback(self, msg: ArenaModelMsg) -> None:
         """Cache arena boundary, zones, and obstacles."""
@@ -270,6 +282,59 @@ class CotBridgeNode(Node):
             }
             for obs in msg.obstacles
         ]
+
+    def _engagement_event_callback(self, msg: EngagementOutcomeMsg) -> None:
+        """Translate a typed EngagementOutcome into CoT alert + casualty marker."""
+        if not msg.fired:
+            return  # nothing to render for blocked/skipped intents
+
+        actor = int(msg.actor_id)
+        target = int(msg.target_id)
+        weapon = str(msg.weapon)
+
+        # Resolve target position from cached robots
+        with self._robot_lock:
+            tgt = next(
+                (r for r in self._robots if r.get("robot_id") == target),
+                None,
+            )
+        if tgt is None:
+            return
+        try:
+            lat, lon = self._geo.arena_to_latlon(tgt["x"], tgt["y"])
+        except Exception as e:
+            self.get_logger().warning(f"Geo conversion failed: {e}")
+            return
+
+        verdict = "hit" if msg.hit else ("blocked" if msg.blocked else "miss")
+
+        try:
+            xml = make_engagement_event(
+                actor_uid=f"platopod-{actor}" if actor >= 0 else "indirect",
+                target_uid=f"platopod-{target}",
+                weapon=weapon,
+                outcome=verdict,
+                lat=lat, lon=lon,
+                rationale=str(msg.rationale),
+            )
+            self._transport.send(xml)
+        except Exception as e:
+            self.get_logger().warning(f"Failed to send engagement CoT: {e}")
+
+        if msg.hit and msg.damage > 0:
+            new_health = max(0.0, float(tgt.get("health", 1.0)) - float(msg.damage))
+            status = "destroyed" if new_health <= 0.0 else "wounded"
+            try:
+                xml = make_casualty_event(
+                    robot_uid=f"platopod-{target}-cas",
+                    callsign=str(tgt.get("callsign", f"BOT-{target}")),
+                    lat=lat, lon=lon,
+                    status=status,
+                    health=new_health,
+                )
+                self._transport.send(xml)
+            except Exception as e:
+                self.get_logger().warning(f"Failed to send casualty CoT: {e}")
 
     # --- Outbound publishing ---
 

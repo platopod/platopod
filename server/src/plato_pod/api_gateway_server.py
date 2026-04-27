@@ -37,7 +37,9 @@ from plato_pod.ws_protocol import (
     validate_apply_preset,
     validate_cmd_vel,
     validate_configure_sensor,
+    validate_fire_weapon,
     validate_inject_event,
+    validate_report_observation,
     validate_subscribe,
     validate_subscribe_sensors,
 )
@@ -161,6 +163,8 @@ def create_gateway_app(
     on_apply_preset: Callable[[int, str], tuple[bool, str]] | None = None,
     on_get_robot_sensors: Callable[[int], list[str]] | None = None,
     on_inject_event: Callable[[str, dict], tuple[bool, str]] | None = None,
+    on_fire_intent: Callable[[int, int | None, str, tuple[float, float] | None], None] | None = None,
+    on_observation: Callable[[int, int, str], None] | None = None,
     admin_token: str = "",
     max_linear: float = 0.2,
     max_angular: float = 2.0,
@@ -326,6 +330,10 @@ def create_gateway_app(
                     await _handle_apply_preset(ws, fields)
                 elif msg_type == "inject_event":
                     await _handle_inject_event(ws, fields)
+                elif msg_type == "fire_weapon":
+                    await _handle_fire_weapon(ws, fields)
+                elif msg_type == "report_observation":
+                    await _handle_report_observation(ws, fields)
                 else:
                     await ws.send_text(format_error(
                         "invalid_command", None,
@@ -570,6 +578,42 @@ def create_gateway_app(
             await ws.send_text(format_inject_event_ack(
                 event_type, "error", "Event injection not configured"
             ))
+
+    async def _handle_fire_weapon(ws: WebSocket, fields: dict) -> None:
+        valid, err_msg = validate_fire_weapon(fields)
+        if not valid:
+            await ws.send_text(format_error("invalid_command", None, err_msg))
+            return
+        if on_fire_intent is None:
+            await ws.send_text(format_error(
+                "unsupported", fields.get("robot_id"),
+                "fire_weapon not configured (engagement_node not running?)",
+            ))
+            return
+        target_pos = fields.get("target_position")
+        pos_tuple = (
+            (float(target_pos[0]), float(target_pos[1]))
+            if target_pos else None
+        )
+        on_fire_intent(
+            int(fields["robot_id"]),
+            fields.get("target_id"),
+            str(fields["weapon"]),
+            pos_tuple,
+        )
+
+    async def _handle_report_observation(ws: WebSocket, fields: dict) -> None:
+        valid, err_msg = validate_report_observation(fields)
+        if not valid:
+            await ws.send_text(format_error("invalid_command", None, err_msg))
+            return
+        if on_observation is None:
+            return
+        on_observation(
+            int(fields["robot_id"]),
+            int(fields["target_id"]),
+            str(fields["classification"]),
+        )
 
     async def _broadcast_event(event: PipelineEvent) -> None:
         """Send an event to all clients subscribed to the robot."""

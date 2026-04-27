@@ -15,6 +15,7 @@ from std_msgs.msg import String
 from plato_pod_msgs.msg import (
     ArenaModel as ArenaModelMsg,
     RobotStatusList as RobotStatusListMsg,
+    SensorReading as SensorReadingMsg,
 )
 
 from plato_pod.robot import Robot
@@ -23,6 +24,47 @@ from plato_pod.sensor_plugins.base import ArenaState, EnvironmentContext, Sensor
 from plato_pod.sensor_plugins.gazebo_bridge import GazeboImuBridge, GazeboLidarBridge
 from plato_pod.sensor_plugins.gaden_bridge import GadenGasBridge
 from plato_pod.virtual_layer_loader import load_virtual_layers
+
+
+# Per-sensor schema versions — bump when the payload shape changes
+SENSOR_SCHEMA_VERSIONS = {
+    "gas": "1.0",
+    "gps": "1.0",
+    "lidar_2d": "1.0",
+    "sonar": "1.0",
+    "fof": "1.0",
+    "rangefinder": "1.0",
+    "thermal": "1.0",
+    "ied_detector": "1.0",
+    "df_receiver": "1.0",
+    "uav_camera": "1.0",
+    "imu": "1.0",
+}
+
+
+def _make_sensor_reading_msg(
+    *, robot_id: int, sensor_name: str,
+    timestamp: float, payload: dict,
+) -> SensorReadingMsg:
+    """Build a typed SensorReading envelope from a Python sensor reading dict."""
+    msg = SensorReadingMsg()
+    msg.robot_id = int(robot_id)
+    msg.sensor_name = sensor_name
+    msg.timestamp = float(timestamp)
+    msg.schema_version = SENSOR_SCHEMA_VERSIONS.get(sensor_name, "1.0")
+    msg.payload_format = "json"
+    msg.payload = json.dumps(payload, default=_json_default)
+    msg.typed_published = False
+    return msg
+
+
+def _json_default(obj):
+    """Best-effort JSON encoder for tuples and other simple types."""
+    if isinstance(obj, tuple):
+        return list(obj)
+    if hasattr(obj, "__dict__"):
+        return obj.__dict__
+    return str(obj)
 
 
 class SensorEngineNode(Node):
@@ -291,14 +333,12 @@ class SensorEngineNode(Node):
                 pub = self._get_or_create_pub(
                     reading.robot_id, reading.sensor_name
                 )
-                msg = String()
-                msg.data = json.dumps({
-                    "robot_id": reading.robot_id,
-                    "sensor": reading.sensor_name,
-                    "timestamp": reading.timestamp,
-                    "data": sensor_data,
-                })
-                pub.publish(msg)
+                pub.publish(_make_sensor_reading_msg(
+                    robot_id=reading.robot_id,
+                    sensor_name=reading.sensor_name,
+                    timestamp=reading.timestamp,
+                    payload=sensor_data,
+                ))
 
             # Publish Gazebo-only sensors (IMU) that have no Python equivalent
             if self._sensor_source == "gazebo":
@@ -307,25 +347,23 @@ class SensorEngineNode(Node):
                 if imu_bridge and imu_bridge.has_data():
                     import time as _time
                     pub = self._get_or_create_pub(rid, "imu")
-                    imu_msg = String()
-                    imu_msg.data = json.dumps({
-                        "robot_id": rid,
-                        "sensor": "imu",
-                        "timestamp": _time.time(),
-                        "data": imu_bridge.compute(
+                    pub.publish(_make_sensor_reading_msg(
+                        robot_id=rid,
+                        sensor_name="imu",
+                        timestamp=_time.time(),
+                        payload=imu_bridge.compute(
                             robot_state, self._arena, [], SensorConfig(),
                         ),
-                    })
-                    pub.publish(imu_msg)
+                    ))
 
     def _get_or_create_pub(self, robot_id: int, sensor_name: str):
-        """Get or create a publisher for a robot's sensor data."""
+        """Get or create a typed SensorReading publisher for a robot's sensor."""
         if robot_id not in self._sensor_pubs:
             self._sensor_pubs[robot_id] = {}
         if sensor_name not in self._sensor_pubs[robot_id]:
             topic = f"/robot_{robot_id}/sensors/{sensor_name}"
             self._sensor_pubs[robot_id][sensor_name] = self.create_publisher(
-                String, topic, 10
+                SensorReadingMsg, topic, 10
             )
         return self._sensor_pubs[robot_id][sensor_name]
 
