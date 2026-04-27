@@ -113,8 +113,55 @@ def load_virtual_layers(exercise_config: dict) -> EnvironmentContext | None:
     wind_direction = float(env_cfg.get("wind_direction", 0.0))
     temperature = float(env_cfg.get("temperature", 20.0))
 
+    # Point-source style entities (IED zones, EW emitters, civilian
+    # populations). Each is a list of dicts with at minimum a `position`.
+    # Plugins read these via environment.point_sources[<key>].
+    point_sources: dict[str, list[dict]] = {}
+
+    for entry in layers_cfg.get("ied_zones", []) or []:
+        pos = entry.get("position")
+        if pos is None:
+            continue
+        point_sources.setdefault("ied", []).append({
+            "position": (float(pos[0]), float(pos[1])),
+            "detectability_radius_m": float(
+                entry.get("detectability_radius_m", 5.0)
+            ),
+            "label": str(entry.get("label", "ied")),
+        })
+
+    for entry in layers_cfg.get("ew_emitters", []) or []:
+        pos = entry.get("position")
+        if pos is None:
+            continue
+        point_sources.setdefault("ew_emitters", []).append({
+            "position": (float(pos[0]), float(pos[1])),
+            "frequency_mhz": float(entry.get("frequency_mhz", 0.0)),
+            "signal_strength": float(entry.get("signal_strength", 1.0)),
+            "label": str(entry.get("label", "emitter")),
+        })
+
+    for entry in layers_cfg.get("civilian_population", []) or []:
+        pos = entry.get("position")
+        if pos is None:
+            continue
+        point_sources.setdefault("civilian", []).append({
+            "position": (float(pos[0]), float(pos[1])),
+            "movement": str(entry.get("movement", "stationary")),
+            "radius_m": float(entry.get("radius_m", 0.0)),
+            "count": int(entry.get("count", 1)),
+            "label": str(entry.get("label", "civilian")),
+        })
+
+    if point_sources:
+        logger.info(
+            "Loaded point sources: %s",
+            {k: len(v) for k, v in point_sources.items()},
+        )
+
     return EnvironmentContext(
         fields=fields,
+        point_sources=point_sources,
         wind_speed=wind_speed,
         wind_direction=wind_direction,
         temperature=temperature,

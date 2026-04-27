@@ -8,8 +8,13 @@ import pytest
 
 from plato_pod.cot_protocol import (
     VEHICLE_ROLE_TO_COT_TYPE,
+    make_casualty_event,
+    make_civilian_marker,
     make_contact_detail,
     make_cot_event,
+    make_engagement_event,
+    make_ied_marker,
+    make_remarks_detail,
     make_sensor_detail,
     make_shape_event,
     make_track_detail,
@@ -190,3 +195,51 @@ class TestRobotIdFromUid:
 
     def test_prefix_only(self) -> None:
         assert robot_id_from_uid("platopod") == -1
+
+
+class TestEngagementCoT:
+    def test_engagement_event_xml_well_formed(self) -> None:
+        xml = make_engagement_event(
+            "platopod-1", "platopod-2", "M4", "hit",
+            lat=-35.0, lon=149.0, rationale="clean shot",
+        )
+        root = ET.fromstring(xml)
+        assert root.attrib["type"] == "b-r-f-h-c"
+        remarks = root.find("detail/remarks")
+        assert remarks is not None
+        assert "M4" in (remarks.text or "")
+        assert "hit" in (remarks.text or "")
+
+    def test_casualty_destroyed_uses_hostile_x(self) -> None:
+        xml = make_casualty_event(
+            "platopod-3", "BLUE-3", -35.0, 149.0,
+            status="destroyed", health=0.0,
+        )
+        root = ET.fromstring(xml)
+        assert root.attrib["type"] == "a-h-G-X"
+
+    def test_casualty_wounded_uses_friendly(self) -> None:
+        xml = make_casualty_event(
+            "platopod-3", "BLUE-3", -35.0, 149.0,
+            status="wounded", health=0.4,
+        )
+        root = ET.fromstring(xml)
+        assert root.attrib["type"] == "a-f-G-X"
+
+    def test_ied_marker(self) -> None:
+        xml = make_ied_marker("ied-1", -35.0, 149.0,
+                                confidence=0.9, label="device-1")
+        root = ET.fromstring(xml)
+        assert root.attrib["type"] == "u-d-c-c"
+        assert root.attrib["uid"] == "ied-1"
+
+    def test_civilian_marker(self) -> None:
+        xml = make_civilian_marker("civ-1", -35.0, 149.0, label="bystander")
+        root = ET.fromstring(xml)
+        assert root.attrib["type"] == "a-n-G"
+
+    def test_remarks_escapes_xml(self) -> None:
+        det = make_remarks_detail("a < b & c > d")
+        assert "&lt;" in det
+        assert "&amp;" in det
+        assert "&gt;" in det

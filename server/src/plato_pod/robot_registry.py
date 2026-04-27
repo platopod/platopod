@@ -142,6 +142,11 @@ class Registry:
         theta: float,
         radius: float,
         boundary: tuple[tuple[float, float], ...],
+        team: str | None = None,
+        vehicle_role: str = "default",
+        health: float = 1.0,
+        weapons: list[str] | None = None,
+        thermal_signature: float = 1.0,
     ) -> tuple[bool, int, str]:
         """Spawn a virtual robot with boundary and collision validation.
 
@@ -151,6 +156,11 @@ class Registry:
             theta: Spawn heading.
             radius: Robot radius (0 for default).
             boundary: Arena boundary polygon.
+            team: Tactical team ("blue", "red", "green", or None).
+            vehicle_role: Role label for symbology and behavior.
+            health: Initial health 0..1.
+            weapons: List of weapon names available to this unit.
+            thermal_signature: Thermal sensor visibility 0..1.
 
         Returns:
             Tuple of (success, robot_id, message).
@@ -178,6 +188,11 @@ class Registry:
                 x=x, y=y, theta=theta,
                 radius=radius,
                 status="active",
+                team=team,
+                vehicle_role=vehicle_role,
+                health=health,
+                weapons=list(weapons) if weapons else [],
+                thermal_signature=thermal_signature,
             )
             self._robots[robot_id] = entry
             logger.info("Virtual robot spawned: id=%d at (%.3f, %.3f)", robot_id, x, y)
@@ -214,6 +229,23 @@ class Registry:
             self._robots[robot_id] = replace(entry, status="inactive")
             logger.info("Physical robot reset: id=%d", robot_id)
             return True, "OK"
+
+    def apply_damage(
+        self, robot_id: int, damage: float,
+    ) -> tuple[bool, float, str, str]:
+        """Subtract damage from a robot's health and update status.
+
+        Returns:
+            (success, new_health, new_status, message).
+        """
+        from plato_pod.health import apply_damage
+        with self._lock:
+            entry = self._robots.get(robot_id)
+            if entry is None:
+                return False, 0.0, "unknown", f"Robot {robot_id} not found"
+            updated = apply_damage(entry, damage)
+            self._robots[robot_id] = updated
+            return True, updated.health, updated.status, "OK"
 
     def list_robots(self) -> list[Robot]:
         """Return a snapshot of all registered robots."""

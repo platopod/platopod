@@ -10,11 +10,20 @@ from plato_pod.command_pipeline import (
     PipelineResult,
     boundary_filter,
     collision_filter,
+    mobility_filter,
     predict_position,
     run_pipeline,
     speed_limit,
+    state_filter,
 )
-from plato_pod.robot import Robot
+from plato_pod.robot import (
+    Robot,
+    STATUS_ACTIVE,
+    STATUS_DESTROYED,
+    STATUS_FROZEN,
+    STATUS_INCAPACITATED,
+    STATUS_WOUNDED,
+)
 
 UNIT_BOUNDARY = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
 
@@ -246,3 +255,118 @@ class TestRunPipeline:
             max_linear=0.2, terrain_speed_modifier=0.5,
         )
         assert r.linear_x == pytest.approx(0.1)
+
+
+# --- state_filter ---
+
+class TestStateFilter:
+    def test_active_passes(self) -> None:
+        robot = _robot()
+        r = state_filter(0.1, 0.5, robot)
+        assert r.linear_x == pytest.approx(0.1)
+        assert r.angular_z == pytest.approx(0.5)
+        assert len(r.events) == 0
+
+    def test_destroyed_rejects(self) -> None:
+        robot = Robot(robot_id=1, deployment="virtual", status=STATUS_DESTROYED, health=0.0)
+        r = state_filter(0.5, 1.0, robot)
+        assert r.linear_x == 0.0
+        assert r.angular_z == 0.0
+        assert len(r.events) == 1
+        assert r.events[0].event == "command_rejected"
+        assert r.events[0].detail["reason"] == STATUS_DESTROYED
+
+    def test_frozen_rejects(self) -> None:
+        robot = Robot(robot_id=1, deployment="virtual", status=STATUS_FROZEN)
+        r = state_filter(0.1, 0.0, robot)
+        assert r.linear_x == 0.0
+        assert r.events[0].detail["reason"] == STATUS_FROZEN
+
+    def test_incapacitated_rejects(self) -> None:
+        robot = Robot(robot_id=1, deployment="virtual", status=STATUS_INCAPACITATED)
+        r = state_filter(0.1, 0.0, robot)
+        assert r.linear_x == 0.0
+
+
+# --- mobility_filter ---
+
+class TestMobilityFilter:
+    def test_full_health_no_scaling(self) -> None:
+        robot = _robot()  # default health=1.0
+        r = mobility_filter(0.2, 1.0, robot)
+        assert r.linear_x == pytest.approx(0.2)
+        assert r.angular_z == pytest.approx(1.0)
+        assert len(r.events) == 0
+
+    def test_wounded_scales_down(self) -> None:
+        robot = Robot(robot_id=1, deployment="virtual", health=0.5)
+        r = mobility_filter(0.2, 1.0, robot)
+        # mobility_factor(0.5) = 0.5
+        assert r.linear_x == pytest.approx(0.1)
+        assert r.angular_z == pytest.approx(0.5)
+        assert len(r.events) == 1
+        assert r.events[0].event == "mobility_reduced"
+
+    def test_destroyed_zero(self) -> None:
+        robot = Robot(robot_id=1, deployment="virtual", health=0.0,
+                      status=STATUS_DESTROYED)
+        r = mobility_filter(0.2, 0.0, robot)
+        assert r.linear_x == 0.0
+
+    def test_zero_command_no_event(self) -> None:
+        # Don't emit noisy "mobility_reduced" events when there's no command
+        robot = Robot(robot_id=1, deployment="virtual", health=0.5)
+        r = mobility_filter(0.0, 0.0, robot)
+        assert len(r.events) == 0
+
+
+class TestFuelFilter:
+    def test_no_logistics_passthrough(self) -> None:
+        from plato_pod.command_pipeline import fuel_filter
+        robot = _robot()
+        r = fuel_filter(0.2, 1.0, robot)
+        assert r.linear_x == pytest.approx(0.2)
+        assert len(r.events) == 0
+
+    def test_empty_fuel_blocks(self) -> None:
+        from plato_pod.command_pipeline import fuel_filter
+        from plato_pod.logistics import Logistics
+        robot = Robot(robot_id=1, deployment="virtual",
+                       logistics=Logistics(fuel=0.0))
+        r = fuel_filter(0.2, 1.0, robot)
+        assert r.linear_x == 0.0
+        assert r.events[0].event == "out_of_fuel"
+
+    def test_fuel_remaining_passthrough(self) -> None:
+        from plato_pod.command_pipeline import fuel_filter
+        from plato_pod.logistics import Logistics
+        robot = Robot(robot_id=1, deployment="virtual",
+                       logistics=Logistics(fuel=0.5))
+        r = fuel_filter(0.2, 1.0, robot)
+        assert r.linear_x == pytest.approx(0.2)
+
+
+# --- run_pipeline integration with state/mobility ---
+
+class TestRunPipelineWithState:
+    def test_destroyed_short_circuits(self) -> None:
+        robot = Robot(robot_id=1, deployment="virtual", x=0.5, y=0.5,
+                      health=0.0, status=STATUS_DESTROYED, radius=0.028)
+        r = run_pipeline(0.5, 1.0, robot, [], UNIT_BOUNDARY, [])
+        assert r.linear_x == 0.0
+        assert r.angular_z == 0.0
+        # Should have command_rejected event
+        events = [e.event for e in r.events]
+        assert "command_rejected" in events
+        # Boundary/collision filters should not have run
+        assert "boundary_contact" not in events
+        assert "collision_contact" not in events
+
+    def test_wounded_scales_then_pipelined(self) -> None:
+        robot = Robot(robot_id=1, deployment="virtual", x=0.5, y=0.5,
+                      health=0.5, status=STATUS_WOUNDED, radius=0.028)
+        r = run_pipeline(0.2, 0.0, robot, [], UNIT_BOUNDARY, [], max_linear=0.2)
+        # mobility halves 0.2 to 0.1; speed limit (0.2) doesn't clamp
+        assert r.linear_x == pytest.approx(0.1)
+        events = [e.event for e in r.events]
+        assert "mobility_reduced" in events

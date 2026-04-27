@@ -219,3 +219,48 @@ class TestLoadCombined:
         assert "temperature_field" in env.fields
         assert env.wind_speed == pytest.approx(3.0)
         assert env.temperature == pytest.approx(28.0)
+
+
+class TestLoadPointSources:
+    def test_ied_zones(self) -> None:
+        env = load_virtual_layers({"virtual_layers": {
+            "ied_zones": [
+                {"position": [10.0, 20.0], "detectability_radius_m": 8,
+                 "label": "alpha"},
+                {"position": [30.0, 40.0]},
+            ],
+        }})
+        assert env is not None
+        assert len(env.point_sources["ied"]) == 2
+        assert env.point_sources["ied"][0]["label"] == "alpha"
+        assert env.point_sources["ied"][0]["position"] == (10.0, 20.0)
+
+    def test_ew_emitters(self) -> None:
+        env = load_virtual_layers({"virtual_layers": {
+            "ew_emitters": [
+                {"position": [50.0, 60.0], "frequency_mhz": 144,
+                 "signal_strength": 0.7, "label": "EW1"},
+            ],
+        }})
+        assert env is not None
+        assert env.point_sources["ew_emitters"][0]["frequency_mhz"] == 144.0
+
+    def test_civilian_population(self) -> None:
+        env = load_virtual_layers({"virtual_layers": {
+            "civilian_population": [
+                {"position": [0.5, 0.5], "movement": "stationary",
+                 "count": 5, "label": "market"},
+            ],
+        }})
+        assert env is not None
+        civs = env.point_sources["civilian"]
+        assert len(civs) == 1
+        assert civs[0]["count"] == 5
+        assert civs[0]["movement"] == "stationary"
+
+    def test_no_point_sources_section(self) -> None:
+        env = load_virtual_layers({"virtual_layers": {
+            "gas_sources": [{"name": "g", "x": 0, "y": 0}],
+        }})
+        assert env is not None
+        assert env.point_sources == {}

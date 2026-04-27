@@ -38,10 +38,16 @@ class ArenaState:
 class EnvironmentContext:
     """Environmental state for sensor computation.
 
-    Carries virtual data layers (spatial fields) and ambient conditions.
-    Passed to sensor plugins that need environmental awareness.
+    Carries virtual data layers (spatial fields), discrete point sources,
+    and ambient conditions. Passed to sensor plugins that need environmental
+    awareness.
+
+    `point_sources` is keyed by category (e.g. "ied", "ew_emitters",
+    "civilian"); each entry is a list of dicts with at least a
+    `position: tuple[float, float]` field and arbitrary metadata.
     """
     fields: dict[str, SpatialField] = field(default_factory=dict)
+    point_sources: dict[str, list[dict]] = field(default_factory=dict)
     wind_speed: float = 0.0          # m/s
     wind_direction: float = 0.0      # radians (direction wind blows TO)
     temperature: float = 20.0        # Celsius

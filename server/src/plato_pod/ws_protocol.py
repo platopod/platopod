@@ -216,7 +216,132 @@ VALID_INJECT_EVENTS = {
     "trigger_strike",
     "update_field",
     "reset_exercise",
+    "indirect_fire",
+    "resupply",
+    "casevac",
+    "weather",
+    "apply_damage",
 }
+
+
+# --- Tactical messages (engagement, logistics, comms) ---
+
+def validate_fire_weapon(fields: dict) -> tuple[bool, str]:
+    """Validate a fire_weapon message.
+
+    Required: robot_id (int), weapon (str).
+    Optional: target_id (int), target_position ([x, y]).
+    """
+    if not isinstance(fields.get("robot_id"), int):
+        return False, "robot_id must be an integer"
+    if not isinstance(fields.get("weapon"), str):
+        return False, "weapon must be a string"
+    target_id = fields.get("target_id")
+    if target_id is not None and not isinstance(target_id, int):
+        return False, "target_id must be an integer if provided"
+    pos = fields.get("target_position")
+    if pos is not None:
+        if not (isinstance(pos, list) and len(pos) == 2
+                and all(isinstance(v, (int, float)) for v in pos)):
+            return False, "target_position must be [x, y]"
+    if target_id is None and pos is None:
+        return False, "either target_id or target_position is required"
+    return True, ""
+
+
+def validate_request_resupply(fields: dict) -> tuple[bool, str]:
+    """Validate a request_resupply message.
+
+    Required: robot_id (int), items (list[str]).
+    """
+    if not isinstance(fields.get("robot_id"), int):
+        return False, "robot_id must be an integer"
+    items = fields.get("items")
+    if not isinstance(items, list) or not all(isinstance(s, str) for s in items):
+        return False, "items must be a list of strings"
+    return True, ""
+
+
+def validate_declare_intent(fields: dict) -> tuple[bool, str]:
+    if not isinstance(fields.get("robot_id"), int):
+        return False, "robot_id must be an integer"
+    if not isinstance(fields.get("intent"), str):
+        return False, "intent must be a string"
+    return True, ""
+
+
+def validate_report_observation(fields: dict) -> tuple[bool, str]:
+    """Validate a report_observation message (clears a target for ROE)."""
+    if not isinstance(fields.get("robot_id"), int):
+        return False, "robot_id must be an integer"
+    if not isinstance(fields.get("target_id"), int):
+        return False, "target_id must be an integer"
+    if not isinstance(fields.get("classification"), str):
+        return False, "classification must be a string"
+    return True, ""
+
+
+def format_engagement_event(
+    actor_id: int | None, target_id: int | None,
+    weapon: str, outcome: dict,
+) -> str:
+    return json.dumps({
+        "type": "engagement_event",
+        "actor": actor_id,
+        "target": target_id,
+        "weapon": weapon,
+        "outcome": outcome,
+    })
+
+
+def format_casualty_update(
+    robot_id: int, status: str, health: float,
+) -> str:
+    return json.dumps({
+        "type": "casualty_update",
+        "robot_id": robot_id,
+        "status": status,
+        "health": health,
+    })
+
+
+def format_comms_status(
+    robot_id: int, linked: bool, quality: float,
+    relay_id: int | None = None, rationale: str = "",
+) -> str:
+    return json.dumps({
+        "type": "comms_status",
+        "robot_id": robot_id,
+        "linked": linked,
+        "quality": quality,
+        "relay_id": relay_id,
+        "rationale": rationale,
+    })
+
+
+def format_logistics_update(
+    robot_id: int, fuel: float, ammo: dict[str, int],
+    water: float = 1.0,
+) -> str:
+    return json.dumps({
+        "type": "logistics_update",
+        "robot_id": robot_id,
+        "fuel": fuel,
+        "ammo": ammo,
+        "water": water,
+    })
+
+
+def format_roe_violation(
+    robot_id: int, rule: str, severity: str, description: str,
+) -> str:
+    return json.dumps({
+        "type": "roe_violation",
+        "robot_id": robot_id,
+        "rule": rule,
+        "severity": severity,
+        "description": description,
+    })
 
 
 def validate_inject_event(fields: dict) -> tuple[bool, str]:

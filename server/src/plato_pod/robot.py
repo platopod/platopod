@@ -7,11 +7,30 @@ the Robot doesn't know how its pose was determined.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from plato_pod.pose import PoseSource
 
+if TYPE_CHECKING:
+    from plato_pod.logistics import Logistics
+
 DEFAULT_RADIUS = 0.028  # metres
+
+# Robot status enum (string values for YAML/JSON portability)
+STATUS_ACTIVE = "active"
+STATUS_INACTIVE = "inactive"
+STATUS_ERROR = "error"
+STATUS_WOUNDED = "wounded"           # health < 0.5, mobility reduced
+STATUS_DESTROYED = "destroyed"        # health <= 0, no movement, no fire
+STATUS_INCAPACITATED = "incapacitated"  # CBRN exposure, etc.; no movement
+STATUS_FROZEN = "frozen"              # ROE/tag-rule timeout; no movement
+
+# Statuses that block command execution
+NON_OPERATIONAL_STATUSES = frozenset({
+    STATUS_INACTIVE, STATUS_ERROR, STATUS_DESTROYED,
+    STATUS_INCAPACITATED, STATUS_FROZEN,
+})
 
 
 @dataclass
@@ -29,7 +48,7 @@ class Robot:
     y: float = 0.0
     theta: float = 0.0
     radius: float = DEFAULT_RADIUS
-    status: str = "active"      # "active", "inactive", "error"
+    status: str = STATUS_ACTIVE
     localization_id: str = ""   # provider-specific ID (tag "3", "rover-1")
     localization_source: PoseSource = PoseSource.UNKNOWN
     kinematics_model: str = "differential_drive"
@@ -37,6 +56,18 @@ class Robot:
     linear_x: float = 0.0      # current commanded linear velocity
     angular_z: float = 0.0     # current commanded angular velocity
     sensor_preset: str = "minimal"
+
+    # Tactical state (NEW — extends platform for engagement, casualty,
+    # logistics, comms modelling). Defaults preserve backward compatibility.
+    health: float = 1.0                 # 0.0=destroyed, 1.0=full health
+    weapons: list[str] = field(default_factory=list)   # weapon names from YAML
+    thermal_signature: float = 1.0       # 0=cold, 1=hot (for thermal sensor)
+    vehicle_role: str = "default"        # tank, recon, apc, soldier, civilian, hostile, etc.
+    logistics: "Logistics | None" = None  # fuel/ammo/water; None = no tracking
+
+    def is_operational(self) -> bool:
+        """True if the robot can accept commands and move."""
+        return self.status not in NON_OPERATIONAL_STATUSES
 
     def to_dict(self) -> dict:
         """Convert to JSON-serializable dict."""
@@ -55,4 +86,8 @@ class Robot:
             "linear_x": self.linear_x,
             "angular_z": self.angular_z,
             "sensor_preset": self.sensor_preset,
+            "health": self.health,
+            "weapons": list(self.weapons),
+            "thermal_signature": self.thermal_signature,
+            "vehicle_role": self.vehicle_role,
         }

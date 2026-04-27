@@ -107,6 +107,106 @@ def make_track_detail(course: float, speed: float) -> str:
     return f'<track course="{course:.1f}" speed="{speed:.2f}"/>'
 
 
+def make_remarks_detail(text: str) -> str:
+    """Generate <remarks>text</remarks> XML fragment (ATAK tap-to-view)."""
+    safe = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return f"<remarks>{safe}</remarks>"
+
+
+def make_engagement_event(
+    actor_uid: str,
+    target_uid: str,
+    weapon: str,
+    outcome: str,
+    lat: float,
+    lon: float,
+    rationale: str = "",
+    stale_seconds: float = 30.0,
+) -> str:
+    """Generate a CoT alert marking an engagement.
+
+    Uses a combat marker type (`b-r-f-h-c` — combat: fire) at the contact
+    location. Remarks include actor → target, weapon, outcome.
+    """
+    uid = f"engagement-{actor_uid}-{target_uid}-{int(_utc_now().timestamp())}"
+    remarks = (
+        f"Engagement: {actor_uid} -> {target_uid} | weapon={weapon} | "
+        f"outcome={outcome}"
+    )
+    if rationale:
+        remarks += f" | {rationale}"
+    detail = make_contact_detail(f"FIRE_{weapon}") + make_remarks_detail(remarks)
+    return make_cot_event(
+        uid=uid, cot_type="b-r-f-h-c",
+        lat=lat, lon=lon,
+        stale_seconds=stale_seconds,
+        detail_xml=detail,
+    )
+
+
+def make_casualty_event(
+    robot_uid: str,
+    callsign: str,
+    lat: float,
+    lon: float,
+    status: str,
+    health: float = 0.0,
+    stale_seconds: float = 600.0,
+) -> str:
+    """Generate a casualty marker for a wounded/destroyed unit.
+
+    Uses MIL-STD-2525B `a-h-G-X` (hostile, ground, casualty) for destroyed
+    units regardless of original team — engagement outcomes are the focus.
+    """
+    cot_type = "a-h-G-X" if status == "destroyed" else "a-f-G-X"
+    detail = (
+        make_contact_detail(callsign)
+        + make_remarks_detail(
+            f"Casualty: {callsign} status={status} health={health:.2f}"
+        )
+    )
+    return make_cot_event(
+        uid=robot_uid, cot_type=cot_type,
+        lat=lat, lon=lon,
+        stale_seconds=stale_seconds,
+        detail_xml=detail,
+    )
+
+
+def make_ied_marker(
+    uid: str,
+    lat: float,
+    lon: float,
+    confidence: float,
+    label: str = "IED",
+    stale_seconds: float = 3600.0,
+) -> str:
+    """CBRN/IED hazard marker (`u-d-c-c` — drawing CBRN)."""
+    remarks = f"{label} confidence={confidence:.2f}"
+    return make_cot_event(
+        uid=uid, cot_type="u-d-c-c",
+        lat=lat, lon=lon,
+        stale_seconds=stale_seconds,
+        detail_xml=make_contact_detail(label) + make_remarks_detail(remarks),
+    )
+
+
+def make_civilian_marker(
+    uid: str,
+    lat: float,
+    lon: float,
+    label: str = "civilian",
+    stale_seconds: float = 300.0,
+) -> str:
+    """Neutral civilian marker (`a-n-G`)."""
+    return make_cot_event(
+        uid=uid, cot_type="a-n-G",
+        lat=lat, lon=lon,
+        stale_seconds=stale_seconds,
+        detail_xml=make_contact_detail(label),
+    )
+
+
 def make_sensor_detail(readings: dict[str, float], model_name: str = "") -> str:
     """Generate custom <sensor> detail XML fragment for gas sensor readings.
 

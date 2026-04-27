@@ -11,6 +11,7 @@ import math
 from dataclasses import dataclass
 
 from plato_pod.geometry import circle_to_polygon, polygon_contains_polygon
+from plato_pod.health import mobility_factor
 from plato_pod.kinematics_model import DifferentialDrive, KinematicsModel
 from plato_pod.robot import Robot
 
@@ -33,6 +34,87 @@ class PipelineResult:
     events: tuple[PipelineEvent, ...]
 
 
+
+
+def state_filter(
+    linear_x: float,
+    angular_z: float,
+    robot: Robot,
+) -> PipelineResult:
+    """Reject commands for robots in non-operational states.
+
+    Robots that are destroyed, incapacitated, frozen, inactive, or in
+    error state cannot accept commands. Velocity is forced to 0 and a
+    'command_rejected' event is emitted with the reason.
+    """
+    if robot.is_operational():
+        return PipelineResult(linear_x=linear_x, angular_z=angular_z, events=())
+
+    event = PipelineEvent(
+        event="command_rejected",
+        robot_id=robot.robot_id,
+        detail={
+            "reason": robot.status,
+            "original_linear_x": linear_x,
+            "original_angular_z": angular_z,
+        },
+    )
+    return PipelineResult(linear_x=0.0, angular_z=0.0, events=(event,))
+
+
+def mobility_filter(
+    linear_x: float,
+    angular_z: float,
+    robot: Robot,
+) -> PipelineResult:
+    """Scale velocity by the robot's mobility factor (driven by health).
+
+    Wounded robots move slower; destroyed robots cannot move at all.
+    Emits 'mobility_reduced' event when scaling occurs.
+    """
+    factor = mobility_factor(robot.health)
+    if factor >= 1.0:
+        return PipelineResult(linear_x=linear_x, angular_z=angular_z, events=())
+
+    scaled_lin = linear_x * factor
+    scaled_ang = angular_z * factor
+
+    if abs(linear_x) < 1e-9 and abs(angular_z) < 1e-9:
+        # No command to scale; don't emit a noisy event
+        return PipelineResult(linear_x=scaled_lin, angular_z=scaled_ang, events=())
+
+    event = PipelineEvent(
+        event="mobility_reduced",
+        robot_id=robot.robot_id,
+        detail={
+            "health": robot.health,
+            "mobility_factor": factor,
+            "original_linear_x": linear_x,
+            "scaled_linear_x": scaled_lin,
+        },
+    )
+    return PipelineResult(linear_x=scaled_lin, angular_z=scaled_ang, events=(event,))
+
+
+def fuel_filter(
+    linear_x: float,
+    angular_z: float,
+    robot: Robot,
+) -> PipelineResult:
+    """Reject movement when the robot has logistics tracking and zero fuel.
+
+    Units without logistics tracking (`robot.logistics is None`) are
+    untouched. Emits 'out_of_fuel' on rejection.
+    """
+    from plato_pod.logistics import is_immobile
+    if not is_immobile(robot):
+        return PipelineResult(linear_x=linear_x, angular_z=angular_z, events=())
+    event = PipelineEvent(
+        event="out_of_fuel",
+        robot_id=robot.robot_id,
+        detail={"original_linear_x": linear_x, "original_angular_z": angular_z},
+    )
+    return PipelineResult(linear_x=0.0, angular_z=0.0, events=(event,))
 
 
 def speed_limit(
@@ -336,8 +418,26 @@ def run_pipeline(
     """
     all_events: list[PipelineEvent] = []
 
+    # Stage 0: state filter — reject if robot non-operational (destroyed,
+    # frozen, incapacitated, etc.)
+    s0 = state_filter(linear_x, angular_z, robot)
+    all_events.extend(s0.events)
+    if s0.linear_x == 0.0 and s0.angular_z == 0.0 and not robot.is_operational():
+        # Short-circuit — no further processing if rejected
+        return PipelineResult(
+            linear_x=0.0, angular_z=0.0, events=tuple(all_events),
+        )
+
+    # Stage 0b: mobility filter — scale velocity by health
+    s0b = mobility_filter(s0.linear_x, s0.angular_z, robot)
+    all_events.extend(s0b.events)
+
+    # Stage 0c: fuel filter — reject if out of fuel
+    s0c = fuel_filter(s0b.linear_x, s0b.angular_z, robot)
+    all_events.extend(s0c.events)
+
     # Stage 1: speed limit
-    r1 = speed_limit(linear_x, angular_z, max_linear, max_angular, robot.robot_id)
+    r1 = speed_limit(s0c.linear_x, s0c.angular_z, max_linear, max_angular, robot.robot_id)
     all_events.extend(r1.events)
 
     # Stage 2: terrain speed modifier
