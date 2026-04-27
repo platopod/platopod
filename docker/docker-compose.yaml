@@ -26,6 +26,7 @@ services:
       - ../web:/ros2_ws/web
       - ../models:/ros2_ws/models
       - ../docker:/ros2_ws/docker
+      - ../tools:/ros2_ws/tools
 
       # Persist colcon build artifacts between container restarts
       - ros-build:/ros2_ws/build
