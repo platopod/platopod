@@ -487,7 +487,10 @@ def _make_ellipse_drawing(
     link_attr.set("line_thickness", "3")
     link_attr.set("fill_color", str(fill_int))
 
-    ET.SubElement(detail, "archive")
+    # Deliberately NO <archive> element — plume contours are transient
+    # (concentration evolves second-by-second). Without archive ATAK lets
+    # the ellipse expire naturally at stale_seconds rather than persist
+    # in the local database forever.
 
     if label:
         contact = ET.SubElement(detail, "contact")
@@ -561,7 +564,7 @@ def _make_polygon_drawing(
     link_attr.set("line_thickness", "3")
     link_attr.set("fill_color", str(fill_int))
 
-    ET.SubElement(detail, "archive")
+    # No <archive>: polygon plume contours are transient too.
 
     if label:
         contact = ET.SubElement(detail, "contact")
