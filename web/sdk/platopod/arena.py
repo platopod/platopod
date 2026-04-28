@@ -171,6 +171,40 @@ class Arena:
             logger.error("list_robots failed: %s", e)
             return []
 
+    def get_world_state(self) -> dict:
+        """Snapshot of the tactical world state (REST call).
+
+        Returns a dict with keys:
+          civilians     — list of {x, y, label, movement, count, radius_m}
+          ied_zones     — list of {x, y, detectability_radius_m, label}
+          cover         — list of {vertices, cover_value, label}
+          ew_emitters   — list of {x, y, frequency_mhz, signal_strength, label}
+          jamming_zones — list of {x, y, radius_m, strength, label}
+          dead_zones    — list of {vertices, label}
+          weather       — {visibility_m, wind_speed, wind_direction, fog_density, time_of_day} or None
+          roe           — {fire_permission, civilian_proximity_m, …} or None
+          weapons       — list of {name, max_range_m, …}
+
+        Empty lists / None mean the platform's world_state_node hasn't
+        published that section (or no exercise scenario is loaded).
+        """
+        import urllib.request
+        url = f"{self._base_http}/world"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                return json.loads(resp.read().decode())
+        except Exception as e:
+            logger.warning("get_world_state failed: %s", e)
+            return {}
+
+    def get_civilians(self) -> list[dict]:
+        """Convenience wrapper: return just the civilian list."""
+        return self.get_world_state().get("civilians", []) or []
+
+    def get_ied_zones(self) -> list[dict]:
+        """Convenience wrapper: return just the IED hazard list."""
+        return self.get_world_state().get("ied_zones", []) or []
+
     def spawn(
         self, x: float, y: float, theta: float = 0.0, radius: float = 0.0
     ) -> dict:

@@ -100,6 +100,78 @@ class ArenaStateStore:
             return self._model_dict
 
 
+@dataclass
+class WorldStateStore:
+    """Thread-safe cache of /world/* topics for SDK queries.
+
+    Populated by api_gateway_node from latched topics published by
+    world_state_node. Each section is a list of dicts (or a single dict
+    for weather/roe) ready to JSON-serialise. Empty lists / None mean
+    "no world_state_node yet" or "scenario doesn't define this layer".
+    """
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _civilians: list[dict] = field(default_factory=list, repr=False)
+    _ied_zones: list[dict] = field(default_factory=list, repr=False)
+    _cover: list[dict] = field(default_factory=list, repr=False)
+    _ew_emitters: list[dict] = field(default_factory=list, repr=False)
+    _jamming_zones: list[dict] = field(default_factory=list, repr=False)
+    _dead_zones: list[dict] = field(default_factory=list, repr=False)
+    _weather: dict | None = field(default=None, repr=False)
+    _roe: dict | None = field(default=None, repr=False)
+    _weapons: list[dict] = field(default_factory=list, repr=False)
+
+    def set_civilians(self, items: list[dict]) -> None:
+        with self._lock:
+            self._civilians = items
+
+    def set_ied_zones(self, items: list[dict]) -> None:
+        with self._lock:
+            self._ied_zones = items
+
+    def set_cover(self, items: list[dict]) -> None:
+        with self._lock:
+            self._cover = items
+
+    def set_ew_emitters(self, items: list[dict]) -> None:
+        with self._lock:
+            self._ew_emitters = items
+
+    def set_jamming_zones(self, items: list[dict]) -> None:
+        with self._lock:
+            self._jamming_zones = items
+
+    def set_dead_zones(self, items: list[dict]) -> None:
+        with self._lock:
+            self._dead_zones = items
+
+    def set_weather(self, w: dict | None) -> None:
+        with self._lock:
+            self._weather = w
+
+    def set_roe(self, r: dict | None) -> None:
+        with self._lock:
+            self._roe = r
+
+    def set_weapons(self, items: list[dict]) -> None:
+        with self._lock:
+            self._weapons = items
+
+    def snapshot(self) -> dict:
+        """Return a JSON-serialisable snapshot of the entire world state."""
+        with self._lock:
+            return {
+                "civilians": list(self._civilians),
+                "ied_zones": list(self._ied_zones),
+                "cover": list(self._cover),
+                "ew_emitters": list(self._ew_emitters),
+                "jamming_zones": list(self._jamming_zones),
+                "dead_zones": list(self._dead_zones),
+                "weather": dict(self._weather) if self._weather else None,
+                "roe": dict(self._roe) if self._roe else None,
+                "weapons": list(self._weapons),
+            }
+
+
 class ConnectionManager:
     """Manages active WebSocket connections and subscriptions."""
 
@@ -171,6 +243,7 @@ def create_gateway_app(
     lookahead_dt: float = 0.1,
     vision_server_url: str = "http://localhost:8081",
     static_dir: str | None = None,
+    world_store: WorldStateStore | None = None,
 ) -> FastAPI:
     """Create the FastAPI application for the API gateway.
 
@@ -215,6 +288,23 @@ def create_gateway_app(
                 {"error": "Arena model not available"}, status_code=503
             )
         return JSONResponse(model)
+
+    @app.get("/world")
+    async def world_state():
+        """Snapshot of the tactical world state.
+
+        Returns the latest values from world_state_node's latched topics:
+        civilians, ied_zones, cover, ew_emitters, jamming_zones,
+        dead_zones, weather, roe, weapons. SDK clients use this to
+        compute things like civilian-proximity flags without needing
+        ROS2 access.
+        """
+        if world_store is None:
+            return JSONResponse(
+                {"error": "World state store not configured"},
+                status_code=503,
+            )
+        return JSONResponse(world_store.snapshot())
 
     @app.get("/health")
     async def health():

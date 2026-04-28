@@ -16,18 +16,34 @@ from rclpy.node import Node
 
 from plato_pod_msgs.msg import (
     ArenaModel as ArenaModelMsg,
+    CivilianList as CivilianListMsg,
+    DeadZoneList as DeadZoneListMsg,
+    EwEmitterList as EwEmitterListMsg,
     FireIntent as FireIntentMsg,
+    IedZoneList as IedZoneListMsg,
+    JammingZoneList as JammingZoneListMsg,
     Observation as ObservationMsg,
     RobotStatusList as RobotStatusListMsg,
+    RoeRules as RoeRulesMsg,
+    WeaponCatalog as WeaponCatalogMsg,
+    WeatherState as WeatherStateMsg,
+    WorldCover as WorldCoverMsg,
 )
 from plato_pod_msgs.srv import ListRobots, RemoveRobot, ResetRobot, SpawnVirtual
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile
 
 from plato_pod.api_gateway_server import (
     ArenaStateStore,
     ConnectionManager,
     RobotStatusStore,
+    WorldStateStore,
     broadcast_poses,
     create_gateway_app,
+)
+
+_LATCHED_QOS = QoSProfile(
+    depth=1, history=HistoryPolicy.KEEP_LAST,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
 )
 from plato_pod.control_manager import ControlManager
 from plato_pod.sensor_engine import SensorEngine
@@ -70,6 +86,7 @@ class ApiGatewayNode(Node):
         # Shared state
         self._robot_store = RobotStatusStore()
         self._arena_store = ArenaStateStore()
+        self._world_store = WorldStateStore()
         self._control_manager = ControlManager()
         self._connection_manager = ConnectionManager()
         self._sensor_engine = SensorEngine()
@@ -118,6 +135,46 @@ class ApiGatewayNode(Node):
             self._arena_model_callback, 10,
         )
 
+        # World state — latched topics from world_state_node, exposed as
+        # /world REST endpoint so SDK clients can compute things like
+        # civilian-proximity flags without ROS2 access.
+        self.create_subscription(
+            CivilianListMsg, "/world/civilians",
+            self._civilians_cb, _LATCHED_QOS,
+        )
+        self.create_subscription(
+            IedZoneListMsg, "/world/ied_zones",
+            self._ied_zones_cb, _LATCHED_QOS,
+        )
+        self.create_subscription(
+            WorldCoverMsg, "/world/cover",
+            self._cover_cb, _LATCHED_QOS,
+        )
+        self.create_subscription(
+            EwEmitterListMsg, "/world/ew_emitters",
+            self._ew_emitters_cb, _LATCHED_QOS,
+        )
+        self.create_subscription(
+            JammingZoneListMsg, "/world/jamming",
+            self._jamming_zones_cb, _LATCHED_QOS,
+        )
+        self.create_subscription(
+            DeadZoneListMsg, "/world/dead_zones",
+            self._dead_zones_cb, _LATCHED_QOS,
+        )
+        self.create_subscription(
+            WeatherStateMsg, "/world/weather",
+            self._weather_cb, _LATCHED_QOS,
+        )
+        self.create_subscription(
+            RoeRulesMsg, "/world/roe",
+            self._roe_cb, _LATCHED_QOS,
+        )
+        self.create_subscription(
+            WeaponCatalogMsg, "/world/weapons",
+            self._weapons_cb, _LATCHED_QOS,
+        )
+
         # Create FastAPI app
         # Resolve static files directory (web/static/ relative to workspace)
         import os
@@ -134,6 +191,7 @@ class ApiGatewayNode(Node):
         app = create_gateway_app(
             robot_store=self._robot_store,
             arena_store=self._arena_store,
+            world_store=self._world_store,
             control_manager=self._control_manager,
             connection_manager=self._connection_manager,
             on_cmd_vel=self._publish_cmd_vel,
@@ -223,6 +281,86 @@ class ApiGatewayNode(Node):
             ],
         }
         self._arena_store.update(boundary, obstacles, model_dict)
+
+    # ─── World-state callbacks (feed WorldStateStore for /world REST) ───
+
+    def _civilians_cb(self, msg: CivilianListMsg) -> None:
+        self._world_store.set_civilians([
+            {"x": float(c.x), "y": float(c.y), "label": c.label,
+             "movement": c.movement, "count": int(c.count),
+             "radius_m": float(c.radius_m)}
+            for c in msg.civilians
+        ])
+
+    def _ied_zones_cb(self, msg: IedZoneListMsg) -> None:
+        self._world_store.set_ied_zones([
+            {"x": float(z.x), "y": float(z.y),
+             "detectability_radius_m": float(z.detectability_radius_m),
+             "label": z.label}
+            for z in msg.zones
+        ])
+
+    def _cover_cb(self, msg: WorldCoverMsg) -> None:
+        self._world_store.set_cover([
+            {"vertices": list(zip(p.vertices_x, p.vertices_y)),
+             "cover_value": float(p.cover_value),
+             "label": p.label}
+            for p in msg.polygons
+        ])
+
+    def _ew_emitters_cb(self, msg: EwEmitterListMsg) -> None:
+        self._world_store.set_ew_emitters([
+            {"x": float(e.x), "y": float(e.y),
+             "frequency_mhz": float(e.frequency_mhz),
+             "signal_strength": float(e.signal_strength),
+             "label": e.label}
+            for e in msg.emitters
+        ])
+
+    def _jamming_zones_cb(self, msg: JammingZoneListMsg) -> None:
+        self._world_store.set_jamming_zones([
+            {"x": float(z.x), "y": float(z.y),
+             "radius_m": float(z.radius_m),
+             "strength": float(z.strength),
+             "label": z.label}
+            for z in msg.zones
+        ])
+
+    def _dead_zones_cb(self, msg: DeadZoneListMsg) -> None:
+        self._world_store.set_dead_zones([
+            {"vertices": list(zip(z.vertices_x, z.vertices_y)),
+             "label": z.label}
+            for z in msg.zones
+        ])
+
+    def _weather_cb(self, msg: WeatherStateMsg) -> None:
+        self._world_store.set_weather({
+            "visibility_m": float(msg.visibility_m),
+            "wind_speed": float(msg.wind_speed),
+            "wind_direction": float(msg.wind_direction),
+            "fog_density": float(msg.fog_density),
+            "time_of_day": float(msg.time_of_day),
+        })
+
+    def _roe_cb(self, msg: RoeRulesMsg) -> None:
+        self._world_store.set_roe({
+            "fire_permission": msg.fire_permission,
+            "civilian_proximity_m": float(msg.civilian_proximity_m),
+            "require_target_id": bool(msg.require_target_id),
+            "friendly_fire_severity": msg.friendly_fire_severity,
+        })
+
+    def _weapons_cb(self, msg: WeaponCatalogMsg) -> None:
+        self._world_store.set_weapons([
+            {"name": w.name,
+             "max_range_m": float(w.max_range_m),
+             "base_pok_at_100m": float(w.base_pok_at_100m),
+             "falloff_per_100m": float(w.falloff_per_100m),
+             "damage": float(w.damage),
+             "ammo_capacity": int(w.ammo_capacity),
+             "suppress_radius_m": float(w.suppress_radius_m)}
+            for w in msg.weapons
+        ])
 
     def _publish_cmd_vel(self, robot_id: int, linear_x: float, angular_z: float) -> None:
         """Publish a Twist message to /robot_{id}/cmd_vel."""

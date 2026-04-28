@@ -410,6 +410,12 @@ def run_live(decide_fn, robot_id: int, scenario_name: str,
     dt = 0.1
     print(f"Live mode: driving robot {robot_id} on {ws_url}")
 
+    # Cache civilians once at start. The platform publishes them via
+    # latched topics so they don't change unless an inject_event fires.
+    civilians = arena.get_civilians()
+    if civilians:
+        print(f"Live world state: {len(civilians)} civilian(s) loaded")
+
     try:
         for tick in range(max_ticks):
             gas = arena.get_sensor(robot_id, "gas") or {}
@@ -428,13 +434,20 @@ def run_live(decide_fn, robot_id: int, scenario_name: str,
                 "team": me.get("team") or "blue",
             }
 
+            # Compute civilian-proximity flag from the cached world state
+            # so the live `reading` shape matches the simulated runtime's.
+            civ_close = any(
+                math.hypot(pose["x"] - float(c["x"]),
+                            pose["y"] - float(c["y"]))
+                < scenario.civilian_proximity_m
+                for c in civilians
+            )
+
             in_red = concentration >= scenario.red_zone_threshold
-            # Civilian proximity is the platform's job; without a
-            # /world/civilians query in the SDK we approximate:
             reading = {
                 "concentration": concentration,
                 "history": list(history),
-                "civilian_proximity": False,    # TODO: query world state
+                "civilian_proximity": civ_close,
                 "in_red_zone": in_red,
             }
 
