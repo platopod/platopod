@@ -53,17 +53,25 @@ python3 plume_runtime.py --scenario civilians
 python3 plume_runtime.py --headless --score # no animation, just print the score
 ```
 
-A matplotlib window opens showing the plume contours (yellow / orange / red), your robot (blue dot), the source (red ✕), civilians (cyan ●), and your trail. Edit `decide()`, save, re-run. Tight feedback loop.
+A **matplotlib window** opens showing the plume contours (yellow / orange / red), your robot (blue dot), the source (red ✕), civilians (cyan ●), and your trail. Edit `decide()`, save, re-run. Tight feedback loop.
+
+> **Why matplotlib here, not iTAK?** This is your *home-development* visualiser — runs on any laptop with no Docker, no platform, no network. The Gaussian plume model is identical to the platform's (`plato_pod.spatial_field.GaussianPlumeField`), so what you see at home is the same field the platform renders in the lab — just shown as a continuous gradient rather than three threshold contours.
 
 ### Lab day — drive a real robot
 
-After your code passes Band 2 in simulation, lab time runs each cadet's solution against the desk arena while the instructor watches the live picture on iTAK:
+When your code passes Band 2 in simulation, the lab session runs each cadet's solution against the desk arena. The visualisation moves to the **instructor's iTAK** (the operator-facing tactical UI) and the **desk arena itself** (your real robot moving in front of you):
 
 ```bash
 python3 plume_runtime.py --live --robot 5
 ```
 
-Same algorithm; same `decide()`. The platform handles tag-based localisation, motor control, gas-sensor plumbing, and the operator picture.
+Same algorithm, same `decide()`. The platform handles AprilTag localisation, motor control, gas-sensor plumbing, and the iTAK picture. **No matplotlib window opens** in `--live` mode — the visualisation has moved to the operator UI.
+
+| Mode | Cadet sees | Instructor sees | Used for |
+|---|---|---|---|
+| `python3 plume_runtime.py` | matplotlib animation | — | Home development |
+| `… --headless --score` | terminal score line | — | Submission / grading |
+| `… --live --robot N` | the desk arena (real robot) | iTAK live picture | Lab session, demo |
 
 ## Scoring
 
